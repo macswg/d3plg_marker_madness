@@ -41,11 +41,29 @@ function resolveBuildOutputDir() {
 
 const buildOutDir = resolveBuildOutputDir()
 
+// Detect if running in Docker via environment variable (set in docker-compose.yml)
+// This allows native file watching on Mac/Linux when not in Docker, and polling when in Docker
+const isDocker = process.env.DOCKER === 'true'
+
 export default defineConfig({
   plugins: [
     vue(),
     designerPythonLoader()
   ],
+  server: {
+    port: 5173,
+    host: '0.0.0.0', // Allow external connections (needed for Docker)
+    watch: {
+      // Use polling in Docker (especially needed on Windows), native watching otherwise
+      usePolling: isDocker,
+      interval: isDocker ? 1000 : undefined, // Polling interval only when polling is enabled
+    },
+    hmr: {
+      port: 5173,
+      host: 'localhost', // HMR host - browser connects to localhost
+      clientPort: 5173, // Port the client connects to
+    },
+  },
   build: {
     outDir: buildOutDir,
     emptyOutDir: false,

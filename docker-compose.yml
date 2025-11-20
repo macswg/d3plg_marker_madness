@@ -8,10 +8,12 @@ services:
     volumes:
       - .:/workspace
       - node_modules:/workspace/node_modules
+      - "C:/Users/macsw/GreenTeam Dropbox/Sean Green/PC (4)/Documents/d3 Projects/testing_msg_build/plugins/marker_madness:/build-output"
     ports:
       - "5173:5173"
     environment:
       - VITE_PORT=5173
+      - DOCKER=true
     tty: true
     stdin_open: true
 
