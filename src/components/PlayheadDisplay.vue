@@ -21,21 +21,29 @@
     liveUpdate: {
       type: Object,
       required: true
+    },
+    transportName: {
+      type: String,
+      default: 'default'
     }
   })
 
   // Define emits
   const emit = defineEmits(['capture-position'])
 
+  // Get the transport name (defaults to 'default')
+  const transportNameValue = props.transportName || 'default'
+  const transportManagerKey = `transportManager:${transportNameValue}`
+  
   // Auto-subscribe to playhead position
-  const { player_tRender } = props.liveUpdate.autoSubscribe('transportManager:default', ['object.player.tRender'])
+  const { player_tRender } = props.liveUpdate.autoSubscribe(transportManagerKey, ['object.player.tRender'])
   
   // Subscribe to timecode from the transport (the actual timecode from the timecode cue)
   // Try different property paths to get the timecode from the track
-  const { value: transportTimecode1 } = props.liveUpdate.autoSubscribe('transportManager:default', ['object.getTransport("default").timecode'])
-  const { value: transportTimecode2 } = props.liveUpdate.autoSubscribe('transportManager:default', ['object.getTransport("default").tcStatusString'])
+  const { value: transportTimecode1 } = props.liveUpdate.autoSubscribe(transportManagerKey, [`object.getTransport("${transportNameValue}").timecode`])
+  const { value: transportTimecode2 } = props.liveUpdate.autoSubscribe(transportManagerKey, [`object.getTransport("${transportNameValue}").tcStatusString`])
   // Try getting timecode from the current track
-  const { value: trackTimecode } = props.liveUpdate.autoSubscribe('transportManager:default', ['object.getTransport("default").track.timecode'])
+  const { value: trackTimecode } = props.liveUpdate.autoSubscribe(transportManagerKey, [`object.getTransport("${transportNameValue}").track.timecode`])
   
   // Convert seconds to timecode format (HH:MM:SS:FF) as fallback
   // Assuming 30 fps for frames
@@ -74,14 +82,22 @@
   .playhead-section {
     margin: 1rem;
     padding: 1rem;
-    border: 1px solid #ccc;
+    border: 1px solid #424242;
     border-radius: 4px;
+    background-color: #1e1e1e;
+    color: #e0e0e0;
+  }
+
+  .playhead-section h2 {
+    color: #ffffff;
+    margin-top: 0;
   }
   
   .playhead-value {
     font-size: 1.2rem;
     font-weight: bold;
     margin-bottom: 1rem;
+    color: #e0e0e0;
   }
 
   .time-display {
@@ -92,25 +108,27 @@
 
   .time-seconds {
     font-size: 1.2rem;
+    color: #ffffff;
   }
 
   .time-timecode {
     font-size: 1rem;
     font-family: 'Courier New', monospace;
-    color: #666;
+    color: #b0b0b0;
   }
 
   .capture-btn {
     padding: 0.5rem 1rem;
-    background-color: #4CAF50;
+    background-color: #388e3c;
     color: white;
     border: none;
     border-radius: 4px;
     cursor: pointer;
     font-size: 1rem;
+    transition: background-color 0.2s ease;
   }
 
   .capture-btn:hover {
-    background-color: #45a049;
+    background-color: #2e7d32;
   }
 </style>

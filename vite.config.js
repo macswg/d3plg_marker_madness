@@ -46,6 +46,7 @@ const buildOutDir = resolveBuildOutputDir()
 const isDocker = process.env.DOCKER === 'true'
 
 export default defineConfig({
+  base: './', // Use relative paths for assets so the plugin works when served from any path
   plugins: [
     vue(),
     designerPythonLoader()

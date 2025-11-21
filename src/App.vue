@@ -1,11 +1,29 @@
 <template>
   <div class="app">
-    <h1>Designer Plugin</h1>
+    <h1>Marker Madness Plugin</h1>
     
+    <!-- Transport Name Configuration -->
+    <div class="transport-config-section">
+      <h2 class="transport-title">Transport Configuration</h2>
+      <div class="transport-input-group">
+        <label for="transport-name" class="transport-label">Transport Name</label>
+        <input 
+          id="transport-name"
+          type="text" 
+          v-model="transportName" 
+          placeholder="default"
+          class="transport-input"
+        />
+        <p class="transport-hint">Enter the name of the transport to monitor and control</p>
+      </div>
+    </div>
     
     <!-- Playhead Display Component -->
+    <!-- Use key to force component recreation when transport name changes -->
     <PlayheadDisplay 
+      :key="transportName"
       :liveUpdate="liveUpdate" 
+      :transportName="transportName"
       @capture-position="capturePosition"
     />
     
@@ -47,6 +65,9 @@ const directorEndpoint = urlParams.get('director') || 'localhost:80' // Fallback
 // Initialize the live update composable for the overlay
 const liveUpdate = useLiveUpdate(directorEndpoint)
 
+// Store the transport name (defaults to 'default')
+const transportName = ref('default')
+
 // Store the list of captured playhead positions
 const storedPositions = ref([])
 
@@ -82,8 +103,13 @@ const goToPosition = async (position) => {
   try {
     console.log(`Attempting to move playhead to ${position.toFixed(2)}s`)
     
+    // Ensure directorEndpoint has protocol, default to http://
+    const endpoint = directorEndpoint.startsWith('http://') || directorEndpoint.startsWith('https://')
+      ? directorEndpoint
+      : `http://${directorEndpoint}`
+    
     // Use the REST API endpoint for gototime
-    const apiUrl = `http://${directorEndpoint}/api/session/transport/gototime`
+    const apiUrl = `${endpoint}/api/session/transport/gototime`
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
@@ -93,13 +119,17 @@ const goToPosition = async (position) => {
         transports: [
           {
             transport: {
-              name: 'default'
+              name: transportName.value || 'default'
             },
             time: position
           }
         ]
       })
     })
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
     
     const result = await response.json()
     if (result.status && result.status.code === 0) {
@@ -114,30 +144,113 @@ const goToPosition = async (position) => {
 </script>
 
 <style>
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background-color: #121212;
+  color: #e0e0e0;
+}
+
 .app {
   max-width: 800px;
   margin: 0 auto;
   padding: 1rem;
   padding-top: 0;
+  background-color: #121212;
+  color: #e0e0e0;
+}
+
+.app h1 {
+  color: #ffffff;
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
 }
 
 .stored-positions-section {
   margin: 1rem;
   padding: 1rem;
-  border: 1px solid #ccc;
+  border: 1px solid #424242;
   border-radius: 4px;
-  background-color: #fff;
-  color: #212121;
+  background-color: #1e1e1e;
+  color: #e0e0e0;
+}
+
+.transport-config-section {
+  margin: 1rem;
+  padding: 1.5rem;
+  border: 2px solid #424242;
+  border-radius: 8px;
+  background-color: #1e1e1e;
+  color: #e0e0e0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.transport-title {
+  margin: 0 0 1.25rem 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #ffffff;
+  border-bottom: 2px solid #424242;
+  padding-bottom: 0.75rem;
+}
+
+.transport-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.transport-label {
+  display: block;
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #b0b0b0;
+  margin-bottom: 0.25rem;
+  letter-spacing: 0.3px;
+}
+
+.transport-input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: 2px solid #424242;
+  border-radius: 6px;
+  font-size: 1rem;
+  color: #e0e0e0;
+  background-color: #2a2a2a;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.transport-input:focus {
+  outline: none;
+  border-color: #64b5f6;
+  box-shadow: 0 0 0 3px rgba(100, 181, 246, 0.2);
+}
+
+.transport-input::placeholder {
+  color: #757575;
+  font-style: italic;
+}
+
+.transport-hint {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #9e9e9e;
+  font-style: italic;
+  line-height: 1.4;
 }
 
 .stored-positions-section h2 {
   margin-top: 0;
   margin-bottom: 1rem;
-  color: #212121;
+  color: #ffffff;
 }
 
 .empty-message {
-  color: #666;
+  color: #9e9e9e;
   font-style: italic;
   padding: 0.5rem 0;
 }
@@ -154,8 +267,9 @@ const goToPosition = async (position) => {
   align-items: center;
   padding: 0.5rem;
   margin: 0.5rem 0;
-  background-color: #f5f5f5;
+  background-color: #2a2a2a;
   border-radius: 4px;
+  border: 1px solid #424242;
 }
 
 .button-group {
@@ -171,39 +285,41 @@ const goToPosition = async (position) => {
 
 .position-seconds {
   font-weight: bold;
-  color: #212121;
+  color: #ffffff;
   font-size: 1.1rem;
 }
 
 .position-timecode {
   font-size: 0.9rem;
   font-family: 'Courier New', monospace;
-  color: #666;
+  color: #b0b0b0;
 }
 
 .go-to-btn {
   padding: 0.25rem 0.5rem;
-  background-color: #2196F3;
+  background-color: #1976d2;
   color: white;
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  transition: background-color 0.2s ease;
 }
 
 .go-to-btn:hover {
-  background-color: #1976D2;
+  background-color: #1565c0;
 }
 
 .remove-btn {
   padding: 0.25rem 0.5rem;
-  background-color: #ff4444;
+  background-color: #d32f2f;
   color: white;
   border: none;
   border-radius: 4px;
   cursor: pointer;
+  transition: background-color 0.2s ease;
 }
 
 .remove-btn:hover {
-  background-color: #cc0000;
+  background-color: #c62828;
 }
 </style>
