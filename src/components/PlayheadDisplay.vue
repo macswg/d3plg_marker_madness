@@ -50,7 +50,9 @@
   
 <style scoped>
   .playhead-section {
-    margin: 1rem;
+    margin: 0.5rem 0;
+    margin-left: 0.5rem;
+    margin-right: 0.5rem;
     padding: 1rem;
     border: 1px solid #424242;
     border-radius: 4px;
@@ -61,18 +63,24 @@
   .playhead-section h2 {
     color: #ffffff;
     margin-top: 0;
+    margin-bottom: 0.5rem;
+    text-align: center;
   }
   
   .playhead-value {
     font-size: 1.2rem;
     font-weight: bold;
     margin-bottom: 1rem;
+    margin-top: 0;
     color: #e0e0e0;
+    display: flex;
+    justify-content: center;
   }
 
   .time-display {
     display: flex;
     flex-direction: column;
+    align-items: center;
     gap: 0.25rem;
   }
 
@@ -90,9 +98,21 @@
     cursor: pointer;
     font-size: 1rem;
     transition: background-color 0.2s ease;
+    display: block;
+    margin: 0 auto;
   }
 
   .capture-btn:hover {
     background-color: #2e7d32;
+  }
+
+  /* Mobile styles - reduce horizontal margins for maximum width */
+  @media (max-width: 768px) {
+    .playhead-section {
+      margin-top: 0.5rem;
+      margin-bottom: 0.5rem;
+      margin-left: 0;
+      margin-right: 0;
+    }
   }
 </style>

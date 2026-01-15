@@ -4,7 +4,6 @@
     
     <!-- Transport Name Configuration -->
     <div class="transport-config-section">
-      <h2 class="transport-title">Transport Configuration</h2>
       <div class="transport-input-group">
         <label for="transport-name" class="transport-label">Transport Name</label>
         <input 
@@ -14,7 +13,6 @@
           placeholder="default"
           class="transport-input"
         />
-        <p class="transport-hint">Enter the name of the transport to monitor and control</p>
       </div>
     </div>
     
@@ -73,7 +71,6 @@
 <script setup>
 import { ref } from 'vue'
 import { useLiveUpdate, LiveUpdateOverlay } from '@disguise-one/vue-liveupdate'
-import TextLayerControl from './components/TextLayerControl.vue'
 import PlayheadDisplay from './components/PlayheadDisplay.vue'
 import { dump, load } from 'js-yaml'
 
@@ -255,9 +252,9 @@ body {
 }
 
 .app {
-  max-width: 800px;
+  max-width: 96%;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 0.5rem 2rem;
   padding-top: 0;
   background-color: #121212;
   color: #e0e0e0;
@@ -267,60 +264,55 @@ body {
   color: #ffffff;
   font-size: 2rem;
   margin-bottom: 0.5rem;
+  text-align: center;
 }
 
 .stored-positions-section {
-  margin: 1rem;
+  margin: 0.5rem 0;
   padding: 1rem;
   border: 1px solid #424242;
   border-radius: 4px;
   background-color: #1e1e1e;
   color: #e0e0e0;
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
 }
 
 .transport-config-section {
-  margin: 1rem;
-  padding: 1.5rem;
-  border: 2px solid #424242;
-  border-radius: 8px;
+  margin: 0.5rem 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid #424242;
+  border-radius: 4px;
   background-color: #1e1e1e;
   color: #e0e0e0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-}
-
-.transport-title {
-  margin: 0 0 1.25rem 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: #ffffff;
-  border-bottom: 2px solid #424242;
-  padding-bottom: 0.75rem;
+  margin-left: 0.5rem;
+  margin-right: 0.5rem;
 }
 
 .transport-input-group {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
   gap: 0.75rem;
 }
 
 .transport-label {
-  display: block;
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: 0.9rem;
   color: #b0b0b0;
-  margin-bottom: 0.25rem;
+  white-space: nowrap;
   letter-spacing: 0.3px;
 }
 
 .transport-input {
   width: 100%;
-  padding: 0.75rem 1rem;
-  border: 2px solid #424242;
-  border-radius: 6px;
-  font-size: 1rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  font-size: 0.9rem;
   color: #e0e0e0;
   background-color: #2a2a2a;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  transition: border-color 0.2s ease;
   font-family: inherit;
   box-sizing: border-box;
 }
@@ -328,20 +320,11 @@ body {
 .transport-input:focus {
   outline: none;
   border-color: #64b5f6;
-  box-shadow: 0 0 0 3px rgba(100, 181, 246, 0.2);
 }
 
 .transport-input::placeholder {
   color: #757575;
   font-style: italic;
-}
-
-.transport-hint {
-  margin: 0;
-  font-size: 0.85rem;
-  color: #9e9e9e;
-  font-style: italic;
-  line-height: 1.4;
 }
 
 .section-header {
@@ -450,6 +433,7 @@ body {
 
 .go-to-btn {
   padding: 0.25rem 0.5rem;
+  min-width: 70px;
   background-color: #1976d2;
   color: white;
   border: none;
@@ -474,5 +458,24 @@ body {
 
 .remove-btn:hover {
   background-color: #c62828;
+}
+
+/* Mobile styles - reduce horizontal margins for maximum width */
+@media (max-width: 768px) {
+  .app {
+    padding: 0;
+  }
+
+  .transport-config-section,
+  .stored-positions-section {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .position-item {
+    gap: 0.75rem;
+  }
 }
 </style>
