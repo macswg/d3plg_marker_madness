@@ -11,6 +11,7 @@
   "dependencies": {
     "@disguise-one/designer-pythonapi": "github:disguise-one/designer-pythonapi",
     "@disguise-one/vue-liveupdate": "github:disguise-one/vue-liveupdate",
+    "js-yaml": "^4.1.0",
     "vue": "^3.5.24"
   },
   "devDependencies": {

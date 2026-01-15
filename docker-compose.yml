@@ -2,13 +2,13 @@ services:
   dev:
     build:
       context: .
-    command: >
-      sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    # Remove command override - let vite.config.js handle host/port settings
+    # This allows proper Tailscale connectivity
     working_dir: /workspace
     volumes:
       - .:/workspace
       - node_modules:/workspace/node_modules
-      - "C:/Users/macsw/GreenTeam Dropbox/Sean Green/PC (4)/Documents/d3 Projects/testing_msg_build/plugins/marker_madness:/build-output"
+      # Add build-output mount in docker-compose.override.yml for your local path
     ports:
       - "5173:5173"
     environment:

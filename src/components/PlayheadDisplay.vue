@@ -6,7 +6,6 @@
       <div class="playhead-value">
         <div class="time-display">
           <span class="time-seconds">{{ player_tRender !== undefined ? player_tRender.toFixed(2) : '0.00' }}s</span>
-          <span class="time-timecode">{{ timecodeValue }}</span>
         </div>
       </div>
       <button @click="handleCapture" class="capture-btn">Capture Position</button>
@@ -14,7 +13,6 @@
 </template>
   
 <script setup>
-  import { computed } from 'vue'
 
   // Define the liveUpdate prop
   const props = defineProps({
@@ -37,34 +35,6 @@
   
   // Auto-subscribe to playhead position
   const { player_tRender } = props.liveUpdate.autoSubscribe(transportManagerKey, ['object.player.tRender'])
-  
-  // Subscribe to timecode from the transport (the actual timecode from the timecode cue)
-  // Try different property paths to get the timecode from the track
-  const { value: transportTimecode1 } = props.liveUpdate.autoSubscribe(transportManagerKey, [`object.getTransport("${transportNameValue}").timecode`])
-  const { value: transportTimecode2 } = props.liveUpdate.autoSubscribe(transportManagerKey, [`object.getTransport("${transportNameValue}").tcStatusString`])
-  // Try getting timecode from the current track
-  const { value: trackTimecode } = props.liveUpdate.autoSubscribe(transportManagerKey, [`object.getTransport("${transportNameValue}").track.timecode`])
-  
-  // Convert seconds to timecode format (HH:MM:SS:FF) as fallback
-  // Assuming 30 fps for frames
-  const formatTimecode = (seconds) => {
-    if (seconds === undefined || seconds === null) {
-      return '00:00:00:00'
-    }
-    const fps = 30
-    const totalFrames = Math.floor(seconds * fps)
-    const hours = Math.floor(totalFrames / (fps * 3600))
-    const minutes = Math.floor((totalFrames % (fps * 3600)) / (fps * 60))
-    const secs = Math.floor((totalFrames % (fps * 60)) / fps)
-    const frames = totalFrames % fps
-    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')}:${String(frames).padStart(2, '0')}`
-  }
-  
-  // Use the actual timecode from transport/track, or fall back to calculated
-  const timecodeValue = computed(() => {
-    // Try track timecode first (from timecode cue), then transport timecode, then tcStatusString, then calculated
-    return trackTimecode?.value || transportTimecode1?.value || transportTimecode2?.value || formatTimecode(player_tRender.value)
-  })
 
   // Handle capture button click
   const handleCapture = () => {
@@ -109,12 +79,6 @@
   .time-seconds {
     font-size: 1.2rem;
     color: #ffffff;
-  }
-
-  .time-timecode {
-    font-size: 1rem;
-    font-family: 'Courier New', monospace;
-    color: #b0b0b0;
   }
 
   .capture-btn {

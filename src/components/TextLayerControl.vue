@@ -12,7 +12,9 @@ import { hello_world } from '../hello_world.py'
 
 // Extract the director endpoint from the URL query parameters
 const urlParams = new URLSearchParams(window.location.search)
-const directorEndpoint = urlParams.get('director') || 'localhost:80' // Fallback for development
+const { hostname } = window.location
+const defaultDirector = hostname ? `${hostname}:80` : 'localhost:80'
+const directorEndpoint = urlParams.get('director') || defaultDirector // Fallback for development
 
 // Initialize the Python bindings composable
 const module = hello_world(directorEndpoint)

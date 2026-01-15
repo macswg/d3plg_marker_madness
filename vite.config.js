@@ -53,17 +53,13 @@ export default defineConfig({
   ],
   server: {
     port: 5173,
-    host: '0.0.0.0', // Allow external connections (needed for Docker)
+    host: '0.0.0.0', // Allow external connections (needed for Docker and Tailscale)
     watch: {
-      // Use polling in Docker (especially needed on Windows), native watching otherwise
-      usePolling: isDocker,
-      interval: isDocker ? 1000 : undefined, // Polling interval only when polling is enabled
+      // Use polling for file watching (required on Windows, especially in Docker)
+      usePolling: true,
+      interval: 1000, // Polling interval in milliseconds
     },
-    hmr: {
-      port: 5173,
-      host: 'localhost', // HMR host - browser connects to localhost
-      clientPort: 5173, // Port the client connects to
-    },
+    // No HMR config - let Vite auto-detect for remote connections
   },
   build: {
     outDir: buildOutDir,
