@@ -30,6 +30,12 @@
       <div class="section-header">
         <h2>Stored Positions</h2>
         <div class="import-export-buttons">
+          <button 
+            @click="numberKeysArmed = !numberKeysArmed" 
+            :class="['number-keys-btn', { 'armed': numberKeysArmed }]"
+          >
+            {{ numberKeysArmed ? 'Disable Number Keys' : 'Enable Number Keys' }}
+          </button>
           <button @click="exportPositions" class="export-btn">Export YAML</button>
           <button @click="triggerImport" class="import-btn">Import YAML</button>
           <input 
@@ -45,9 +51,23 @@
         No positions captured yet. Click "Capture Position" to add one.
       </div>
       <ul v-else class="positions-list">
-        <li v-for="(item, index) in storedPositions" :key="index" class="position-item">
+        <li 
+          v-for="(item, index) in storedPositions" 
+          :key="index" 
+          class="position-item"
+          draggable="true"
+          @dragstart="handleDragStart($event, index)"
+          @dragover="handleDragOver"
+          @dragenter="handleDragEnter"
+          @dragleave="handleDragLeave"
+          @drop="handleDrop($event, index)"
+          @dragend="handleDragEnd"
+        >
           <div class="position-value">
-            <span class="position-seconds">{{ item.position.toFixed(2) }}s</span>
+            <div class="position-header">
+              <span class="position-index">{{ index + 1 }}</span>
+              <span class="position-seconds">{{ item.position.toFixed(2) }}s</span>
+            </div>
             <input 
               type="text" 
               v-model="item.label" 
@@ -69,7 +89,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useLiveUpdate, LiveUpdateOverlay } from '@disguise-one/vue-liveupdate'
 import PlayheadDisplay from './components/PlayheadDisplay.vue'
 import { dump, load } from 'js-yaml'
@@ -92,6 +112,12 @@ const storedPositions = ref([])
 // Ref for file input element
 const fileInput = ref(null)
 
+// State for number key shortcuts (1-9 to jump to markers)
+const numberKeysArmed = ref(false)
+
+// State for drag and drop reordering
+const draggedIndex = ref(null)
+
 // Function to capture the current playhead position
 const capturePosition = (position) => {
   if (position !== undefined && position !== null) {
@@ -105,6 +131,70 @@ const capturePosition = (position) => {
 // Function to remove a position from the list
 const removePosition = (index) => {
   storedPositions.value.splice(index, 1)
+}
+
+// Drag and drop handlers for reordering positions
+const handleDragStart = (event, index) => {
+  draggedIndex.value = index
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData('text/html', event.target)
+  event.target.style.opacity = '0.5'
+}
+
+const handleDragOver = (event) => {
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'move'
+}
+
+const handleDragEnter = (event) => {
+  event.preventDefault()
+  event.currentTarget.classList.add('drag-over')
+}
+
+const handleDragLeave = (event) => {
+  event.currentTarget.classList.remove('drag-over')
+}
+
+const handleDrop = (event, dropIndex) => {
+  event.preventDefault()
+  event.currentTarget.classList.remove('drag-over')
+  
+  if (draggedIndex.value === null || draggedIndex.value === dropIndex) {
+    return
+  }
+  
+  // Get the dragged item
+  const draggedItem = storedPositions.value[draggedIndex.value]
+  
+  // Remove the dragged item from its original position
+  storedPositions.value.splice(draggedIndex.value, 1)
+  
+  // Calculate the new index after removal
+  let newIndex
+  if (draggedIndex.value < dropIndex) {
+    // Dragging down: after removing an item before the drop position,
+    // the dropIndex shifts down by 1, so we use dropIndex (which is now correct)
+    newIndex = dropIndex
+  } else {
+    // Dragging up: after removing an item after the drop position,
+    // the dropIndex remains the same
+    newIndex = dropIndex
+  }
+  
+  // Insert it at the new position
+  storedPositions.value.splice(newIndex, 0, draggedItem)
+  
+  // Reset drag state
+  draggedIndex.value = null
+}
+
+const handleDragEnd = (event) => {
+  event.target.style.opacity = ''
+  draggedIndex.value = null
+  // Remove drag-over class from all items
+  document.querySelectorAll('.position-item').forEach(item => {
+    item.classList.remove('drag-over')
+  })
 }
 
 // Function to move playhead to a specific position
@@ -154,6 +244,27 @@ const goToPosition = async (position) => {
 // Function to export stored positions as YAML
 const exportPositions = () => {
   try {
+    // Prompt user for filename
+    const defaultFilename = `marker-positions-${new Date().toISOString().split('T')[0]}`
+    const userFilename = prompt('Enter filename for export:', defaultFilename)
+    
+    // If user cancelled, exit
+    if (userFilename === null) {
+      return
+    }
+    
+    // Clean the filename (remove invalid characters and ensure .yaml extension)
+    let filename = userFilename.trim()
+    if (!filename) {
+      filename = defaultFilename
+    }
+    // Remove any invalid filename characters
+    filename = filename.replace(/[<>:"/\\|?*]/g, '')
+    // Ensure it ends with .yaml
+    if (!filename.toLowerCase().endsWith('.yaml') && !filename.toLowerCase().endsWith('.yml')) {
+      filename += '.yaml'
+    }
+    
     const data = {
       positions: storedPositions.value.map(item => ({
         position: item.position,
@@ -166,7 +277,7 @@ const exportPositions = () => {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `marker-positions-${new Date().toISOString().split('T')[0]}.yaml`
+    a.download = filename
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -239,6 +350,29 @@ const importPositions = async (event) => {
     }
   }
 }
+
+// Keyboard event handler for number key shortcuts (1-9)
+const handleKeyPress = (event) => {
+  if (!numberKeysArmed.value) return
+  
+  const key = event.key
+  if (key >= '1' && key <= '9') {
+    const index = parseInt(key) - 1
+    if (index < storedPositions.value.length) {
+      event.preventDefault()
+      goToPosition(storedPositions.value[index].position)
+    }
+  }
+}
+
+// Set up and clean up keyboard event listener
+onMounted(() => {
+  window.addEventListener('keydown', handleKeyPress)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyPress)
+})
 </script>
 
 <style>
@@ -344,6 +478,48 @@ body {
 .import-export-buttons {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.number-keys-btn {
+  padding: 0.5rem 1rem;
+  background-color: #424242;
+  color: #e0e0e0;
+  border: 1px solid #616161;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.number-keys-btn:hover {
+  background-color: #4a4a4a;
+  border-color: #757575;
+}
+
+.number-keys-btn.armed {
+  background-color: #d32f2f;
+  border-color: #f44336;
+  color: white;
+  animation: flashRed 0.8s ease-in-out infinite;
+}
+
+.number-keys-btn.armed:hover {
+  background-color: #b71c1c;
+  border-color: #d32f2f;
+}
+
+@keyframes flashRed {
+  0%, 100% {
+    background-color: #b71c1c;
+    border-color: #d32f2f;
+    box-shadow: 0 0 5px rgba(211, 47, 47, 0.4);
+  }
+  50% {
+    background-color: #ff1744;
+    border-color: #ff5252;
+    box-shadow: 0 0 20px rgba(255, 23, 68, 1), 0 0 30px rgba(255, 82, 82, 0.8);
+  }
 }
 
 .export-btn,
@@ -389,6 +565,23 @@ body {
   background-color: #2a2a2a;
   border-radius: 4px;
   border: 1px solid #424242;
+  cursor: move;
+  transition: background-color 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+}
+
+.position-item:hover {
+  background-color: #333333;
+  border-color: #525252;
+}
+
+.position-item.drag-over {
+  border-color: #1976d2;
+  background-color: #1e3a5f;
+  border-style: dashed;
+}
+
+.position-item:active {
+  cursor: grabbing;
 }
 
 .button-group {
@@ -400,6 +593,18 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+}
+
+.position-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.position-index {
+  color: #757575;
+  font-size: 0.85rem;
+  font-weight: 500;
 }
 
 .position-seconds {
