@@ -4,6 +4,12 @@ This template should help get you started developing with Vue 3 in Vite. The tem
 
 Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
 
+## Disguise API reference
+
+See [`docs/disguise-api-reference.md`](docs/disguise-api-reference.md) for a map of the
+relevant Disguise developer docs and the specific REST endpoints / live-update keys
+this plugin uses to read the playhead and control transports.
+
 ## Docker development workflow
 
 1. Install Docker Desktop and make sure the Docker daemon is running.
