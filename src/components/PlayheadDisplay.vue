@@ -2,13 +2,11 @@
 
 <template>
    <div class="playhead-section">
-      <h2>Playhead Position</h2>
-      <div class="playhead-value">
-        <div class="time-display">
-          <span class="time-seconds">{{ player_tRender !== undefined ? player_tRender.toFixed(2) : '0.00' }}s</span>
-        </div>
+      <div class="playhead-header">
+        <button @click="handleCapture" class="capture-btn">Add Marker</button>
+        <span class="playhead-label">Playhead Position</span>
+        <span class="time-seconds">{{ player_tRender !== undefined ? player_tRender.toFixed(2) : '0.00' }}s</span>
       </div>
-      <button @click="handleCapture" class="capture-btn">Capture Position</button>
    </div>
 </template>
   
@@ -40,7 +38,7 @@
   const handleCapture = () => {
     console.log('Capture button clicked, player_tRender:', player_tRender.value)
     if (player_tRender.value !== undefined) {
-      emit('capture-position', player_tRender.value)
+      emit('capture-position', player_tRender.value, transportNameValue)
       console.log('Emitted capture-position event with value:', player_tRender.value)
     } else {
       console.warn('player_tRender is undefined, cannot capture position')
@@ -60,33 +58,24 @@
     color: #e0e0e0;
   }
 
-  .playhead-section h2 {
-    color: #ffffff;
-    margin-top: 0;
-    margin-bottom: 0.5rem;
-    text-align: center;
-  }
-  
-  .playhead-value {
-    font-size: 1.2rem;
-    font-weight: bold;
-    margin-bottom: 1rem;
-    margin-top: 0;
-    color: #e0e0e0;
+  .playhead-header {
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 0.75rem;
   }
 
-  .time-display {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.25rem;
+  .playhead-label {
+    color: #b0b0b0;
+    font-size: 0.9rem;
+    font-weight: normal;
   }
 
   .time-seconds {
-    font-size: 1.2rem;
+    font-size: 0.9rem;
+    font-weight: normal;
     color: #ffffff;
+    font-variant-numeric: tabular-nums;
   }
 
   .capture-btn {
@@ -98,8 +87,6 @@
     cursor: pointer;
     font-size: 1rem;
     transition: background-color 0.2s ease;
-    display: block;
-    margin: 0 auto;
   }
 
   .capture-btn:hover {

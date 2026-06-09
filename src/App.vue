@@ -34,10 +34,22 @@
             @click="numberKeysArmed = !numberKeysArmed" 
             :class="['number-keys-btn', { 'armed': numberKeysArmed }]"
           >
-            {{ numberKeysArmed ? 'Disable Number Keys' : 'Enable Number Keys' }}
+            {{ numberKeysArmed ? 'Num Keys ON' : 'Num Keys OFF' }}
           </button>
-          <button @click="exportPositions" class="export-btn">Export YAML</button>
-          <button @click="triggerImport" class="import-btn">Import YAML</button>
+          <button @click="exportPositions" class="export-btn" title="Export YAML" aria-label="Export YAML">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v12" />
+              <path d="M7 10l5 5 5-5" />
+              <path d="M5 21h14" />
+            </svg>
+          </button>
+          <button @click="triggerImport" class="import-btn" title="Import YAML" aria-label="Import YAML">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 21V9" />
+              <path d="M7 14l5-5 5 5" />
+              <path d="M5 3h14" />
+            </svg>
+          </button>
           <input 
             ref="fileInput"
             type="file" 
@@ -67,6 +79,7 @@
             <div class="position-header">
               <span class="position-index">{{ index + 1 }}</span>
               <span class="position-seconds">{{ item.position.toFixed(2) }}s</span>
+              <span class="position-transport">{{ item.track || '(no track)' }}</span>
             </div>
             <input 
               type="text" 
@@ -76,7 +89,7 @@
             />
           </div>
           <div class="button-group">
-            <button @click="goToPosition(item.position)" class="go-to-btn">Go To</button>
+            <button @click="goToPosition(item)" class="go-to-btn">Go To</button>
             <button @click="removePosition(index)" class="remove-btn">Remove</button>
           </div>
         </li>
@@ -85,6 +98,12 @@
     
     <!-- Display connection status -->
     <LiveUpdateOverlay :liveUpdate="liveUpdate" />
+
+    <!-- Version number -->
+    <footer class="app-footer">
+      <div>v{{ version }}</div>
+      <div class="app-author">Sean Green</div>
+    </footer>
   </div>
 </template>
 
@@ -93,6 +112,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useLiveUpdate, LiveUpdateOverlay } from '@disguise-one/vue-liveupdate'
 import PlayheadDisplay from './components/PlayheadDisplay.vue'
 import { dump, load } from 'js-yaml'
+import { version } from '../package.json'
 
 // Extract the director endpoint from the URL query parameters
 const urlParams = new URLSearchParams(window.location.search)
@@ -118,14 +138,52 @@ const numberKeysArmed = ref(false)
 // State for drag and drop reordering
 const draggedIndex = ref(null)
 
-// Function to capture the current playhead position
-const capturePosition = (position) => {
-  if (position !== undefined && position !== null) {
-    storedPositions.value.push({
-      position: position,
-      label: ''
-    })
+// Build a normalized http(s) base URL for the director REST API
+const apiBase = () => {
+  return directorEndpoint.startsWith('http://') || directorEndpoint.startsWith('https://')
+    ? directorEndpoint
+    : `http://${directorEndpoint}`
+}
+
+// Fetch the track currently loaded on the given transport (read-only GET).
+// Returns { name, uid }; empty strings if it can't be determined.
+const fetchCurrentTrack = async (transport) => {
+  try {
+    const response = await fetch(`${apiBase()}/api/session/transport/activetransport`)
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    const data = await response.json()
+    const transports = Array.isArray(data.result) ? data.result : []
+    // Prefer the transport matching our name, otherwise fall back to the first
+    const match = transports.find(t => t.name === transport) || transports[0]
+    if (match && match.currentTrack) {
+      return {
+        name: match.currentTrack.name || '',
+        uid: match.currentTrack.uid || ''
+      }
+    }
+  } catch (error) {
+    console.warn('Could not fetch current track:', error)
   }
+  return { name: '', uid: '' }
+}
+
+// Function to capture the current playhead position (and the loaded track)
+const capturePosition = async (position, transport) => {
+  if (position === undefined || position === null) {
+    return
+  }
+  const transportNameValue = transport || transportName.value || 'default'
+  // Look up which track is loaded on the transport right now
+  const track = await fetchCurrentTrack(transportNameValue)
+  storedPositions.value.push({
+    position: position,
+    transport: transportNameValue,
+    track: track.name,
+    trackUid: track.uid,
+    label: ''
+  })
 }
 
 // Function to remove a position from the list
@@ -197,45 +255,58 @@ const handleDragEnd = (event) => {
   })
 }
 
-// Function to move playhead to a specific position
-const goToPosition = async (position) => {
+// POST a transport command and verify the status code, throwing on failure
+const postTransportCommand = async (command, body) => {
+  const response = await fetch(`${apiBase()}/api/session/transport/${command}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body)
+  })
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`)
+  }
+
+  const result = await response.json()
+  if (result.status && result.status.code !== 0) {
+    throw new Error(`${command} failed: ${JSON.stringify(result.status)}`)
+  }
+  return result
+}
+
+// Function to move playhead to a stored marker: switch to its track, then seek
+const goToPosition = async (marker) => {
+  const position = marker.position
+  const targetTransport = marker.transport || transportName.value || 'default'
+  const transportLocator = { name: targetTransport }
+
   try {
-    console.log(`Attempting to move playhead to ${position.toFixed(2)}s`)
-    
-    // Ensure directorEndpoint has protocol, default to http://
-    const endpoint = directorEndpoint.startsWith('http://') || directorEndpoint.startsWith('https://')
-      ? directorEndpoint
-      : `http://${directorEndpoint}`
-    
-    // Use the REST API endpoint for gototime
-    const apiUrl = `${endpoint}/api/session/transport/gototime`
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    // 1. Switch to the captured track first (prefer uid, fall back to name).
+    //    Locators check uid when present, so include both when we have them.
+    if (marker.trackUid || marker.track) {
+      const trackLocator = {}
+      if (marker.trackUid) trackLocator.uid = marker.trackUid
+      if (marker.track) trackLocator.name = marker.track
+
+      console.log(`Switching transport "${targetTransport}" to track "${marker.track || marker.trackUid}"`)
+      await postTransportCommand('gototrack', {
         transports: [
-          {
-            transport: {
-              name: transportName.value || 'default'
-            },
-            time: position
-          }
+          { transport: transportLocator, track: trackLocator }
         ]
       })
+    }
+
+    // 2. Seek to the captured time within that track
+    console.log(`Moving playhead to ${position.toFixed(2)}s on transport "${targetTransport}"`)
+    await postTransportCommand('gototime', {
+      transports: [
+        { transport: transportLocator, time: position }
+      ]
     })
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
-    
-    const result = await response.json()
-    if (result.status && result.status.code === 0) {
-      console.log(`Successfully moved playhead to ${position.toFixed(2)}s`)
-    } else {
-      console.error('Error moving playhead:', result.status)
-    }
+
+    console.log(`Successfully moved to ${position.toFixed(2)}s on track "${marker.track || '(none)'}"`)
   } catch (error) {
     console.error('Error moving playhead:', error)
   }
@@ -268,6 +339,9 @@ const exportPositions = () => {
     const data = {
       positions: storedPositions.value.map(item => ({
         position: item.position,
+        transport: item.transport || 'default',
+        track: item.track || '',
+        trackUid: item.trackUid || '',
         label: item.label || ''
       }))
     }
@@ -325,16 +399,18 @@ const importPositions = async (event) => {
       'Click OK to replace, Cancel to append to existing positions.'
     )
     
+    const normalize = pos => ({
+      position: pos.position,
+      transport: pos.transport || 'default',
+      track: pos.track || '',
+      trackUid: pos.trackUid || '',
+      label: pos.label || ''
+    })
+
     if (shouldReplace) {
-      storedPositions.value = validPositions.map(pos => ({
-        position: pos.position,
-        label: pos.label || ''
-      }))
+      storedPositions.value = validPositions.map(normalize)
     } else {
-      storedPositions.value.push(...validPositions.map(pos => ({
-        position: pos.position,
-        label: pos.label || ''
-      })))
+      storedPositions.value.push(...validPositions.map(normalize))
     }
     
     // Reset file input so the same file can be imported again
@@ -360,7 +436,7 @@ const handleKeyPress = (event) => {
     const index = parseInt(key) - 1
     if (index < storedPositions.value.length) {
       event.preventDefault()
-      goToPosition(storedPositions.value[index].position)
+      goToPosition(storedPositions.value[index])
     }
   }
 }
@@ -473,6 +549,8 @@ body {
 .stored-positions-section h2 {
   margin: 0;
   color: #ffffff;
+  font-weight: normal;
+  font-size: 1.3rem;
 }
 
 .import-export-buttons {
@@ -524,7 +602,10 @@ body {
 
 .export-btn,
 .import-btn {
-  padding: 0.5rem 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.6rem;
   background-color: #424242;
   color: #e0e0e0;
   border: 1px solid #616161;
@@ -610,7 +691,16 @@ body {
 .position-seconds {
   font-weight: bold;
   color: #ffffff;
-  font-size: 1.1rem;
+  font-size: 0.95rem;
+}
+
+.position-transport {
+  color: #b0b0b0;
+  font-size: 0.8rem;
+  background-color: #333333;
+  border: 1px solid #424242;
+  border-radius: 3px;
+  padding: 0.05rem 0.4rem;
 }
 
 .position-label-input {
@@ -663,6 +753,17 @@ body {
 
 .remove-btn:hover {
   background-color: #c62828;
+}
+
+.app-footer {
+  text-align: center;
+  color: #757575;
+  font-size: 0.75rem;
+  padding: 1rem 0 0.5rem;
+}
+
+.app-author {
+  margin-top: 0.15rem;
 }
 
 /* Mobile styles - reduce horizontal margins for maximum width */
