@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <rect width="32" height="32" rx="6" fill="#1e1e1e"/>
+  <!-- Playhead tick: triangle head pointing down into a vertical line -->
+  <path d="M9 6 H23 L16 14 Z" fill="#64b5f6"/>
+  <rect x="15" y="12" width="2" height="15" rx="1" fill="#64b5f6"/>
+</svg>

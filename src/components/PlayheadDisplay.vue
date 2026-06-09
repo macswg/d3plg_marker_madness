@@ -11,6 +11,7 @@
 </template>
   
 <script setup>
+  import { onMounted, onUnmounted } from 'vue'
 
   // Define the liveUpdate prop
   const props = defineProps({
@@ -21,6 +22,11 @@
     transportName: {
       type: String,
       default: 'default'
+    },
+    // When true, the ` key adds a marker
+    hotkeyArmed: {
+      type: Boolean,
+      default: false
     }
   })
 
@@ -44,6 +50,23 @@
       console.warn('player_tRender is undefined, cannot capture position')
     }
   }
+
+  // Hotkey: ` adds a marker when armed (ignored while typing in a field)
+  const handleHotkey = (event) => {
+    if (!props.hotkeyArmed || event.key !== '`') return
+    const tag = event.target?.tagName
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return
+    event.preventDefault()
+    handleCapture()
+  }
+
+  onMounted(() => {
+    window.addEventListener('keydown', handleHotkey)
+  })
+
+  onUnmounted(() => {
+    window.removeEventListener('keydown', handleHotkey)
+  })
 </script>
   
 <style scoped>

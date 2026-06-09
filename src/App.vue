@@ -18,10 +18,11 @@
     
     <!-- Playhead Display Component -->
     <!-- Use key to force component recreation when transport name changes -->
-    <PlayheadDisplay 
+    <PlayheadDisplay
       :key="transportName"
-      :liveUpdate="liveUpdate" 
+      :liveUpdate="liveUpdate"
       :transportName="transportName"
+      :hotkeyArmed="markerKeyArmed"
       @capture-position="capturePosition"
     />
     
@@ -30,8 +31,15 @@
       <div class="section-header">
         <h2>Stored Positions</h2>
         <div class="import-export-buttons">
-          <button 
-            @click="numberKeysArmed = !numberKeysArmed" 
+          <button
+            @click="markerKeyArmed = !markerKeyArmed"
+            :class="['number-keys-btn', { 'armed-green': markerKeyArmed }]"
+            title="Press ` to add a marker"
+          >
+            Add Marker Key `
+          </button>
+          <button
+            @click="numberKeysArmed = !numberKeysArmed"
             :class="['number-keys-btn', { 'armed': numberKeysArmed }]"
           >
             {{ numberKeysArmed ? 'Num Keys ON' : 'Num Keys OFF' }}
@@ -134,6 +142,9 @@ const fileInput = ref(null)
 
 // State for number key shortcuts (1-9 to jump to markers)
 const numberKeysArmed = ref(false)
+
+// State for the marker hotkey (` to add a marker)
+const markerKeyArmed = ref(false)
 
 // State for drag and drop reordering
 const draggedIndex = ref(null)
@@ -597,6 +608,31 @@ body {
     background-color: #ff1744;
     border-color: #ff5252;
     box-shadow: 0 0 20px rgba(255, 23, 68, 1), 0 0 30px rgba(255, 82, 82, 0.8);
+  }
+}
+
+.number-keys-btn.armed-green {
+  background-color: #2e7d32;
+  border-color: #43a047;
+  color: white;
+  animation: flashGreen 1.6s ease-in-out infinite;
+}
+
+.number-keys-btn.armed-green:hover {
+  background-color: #1b5e20;
+  border-color: #2e7d32;
+}
+
+@keyframes flashGreen {
+  0%, 100% {
+    background-color: #1b5e20;
+    border-color: #2e7d32;
+    box-shadow: 0 0 5px rgba(46, 125, 50, 0.4);
+  }
+  50% {
+    background-color: #2a7d44;
+    border-color: #388e3c;
+    box-shadow: 0 0 16px rgba(0, 230, 118, 0.25), 0 0 24px rgba(105, 240, 174, 0.2);
   }
 }
 
