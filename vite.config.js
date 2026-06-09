@@ -4,12 +4,29 @@ import { designerPythonLoader } from '@disguise-one/designer-pythonapi/vite-load
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 
-const BUILD_TARGET_FILE = process.env.BUILD_TARGET_FILE ?? '.build-target'
 const FALLBACK_OUT_DIR = 'dist'
+
+// Decide which build-target file to read for the output directory.
+// Priority: explicit BUILD_TARGET_FILE env var > local override > committed default.
+// The local override is skipped inside Docker, where the committed `/build-target`
+// (`/build-output`) plus the compose bind mount own the path — a host-specific
+// path in `.build-target.local` would be meaningless (and broken) in the container.
+function resolveBuildTargetFile() {
+  if (process.env.BUILD_TARGET_FILE) {
+    return process.env.BUILD_TARGET_FILE
+  }
+  if (process.env.DOCKER !== 'true') {
+    const local = path.resolve(process.cwd(), '.build-target.local')
+    if (existsSync(local)) {
+      return '.build-target.local'
+    }
+  }
+  return '.build-target'
+}
 
 function resolveBuildOutputDir() {
   const configuredPath = (() => {
-    const candidate = path.resolve(process.cwd(), BUILD_TARGET_FILE)
+    const candidate = path.resolve(process.cwd(), resolveBuildTargetFile())
     if (!existsSync(candidate)) {
       return null
     }

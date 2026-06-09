@@ -2,17 +2,30 @@
   <div class="app">
     <h1>Marker Madness Plugin</h1>
     
-    <!-- Transport Name Configuration -->
+    <!-- Transport Selection -->
     <div class="transport-config-section">
       <div class="transport-input-group">
-        <label for="transport-name" class="transport-label">Transport Name</label>
-        <input 
+        <label for="transport-name" class="transport-label">Transport</label>
+        <select
           id="transport-name"
-          type="text" 
-          v-model="transportName" 
-          placeholder="default"
+          v-model="transportName"
           class="transport-input"
-        />
+        >
+          <!-- Keep the current value selectable even when the list can't be
+               fetched (e.g. no Designer session), so behaviour still works. -->
+          <option v-if="!availableTransports.some(t => t.name === transportName)" :value="transportName">
+            {{ transportName || 'default' }}
+          </option>
+          <option v-for="t in availableTransports" :key="t.uid || t.name" :value="t.name">
+            {{ t.name }}
+          </option>
+        </select>
+        <button @click="fetchTransports" class="refresh-btn" title="Refresh transport list" aria-label="Refresh transports">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+            <path d="M21 3v5h-5" />
+          </svg>
+        </button>
       </div>
     </div>
     
@@ -134,6 +147,9 @@ const liveUpdate = useLiveUpdate(directorEndpoint)
 // Store the transport name (defaults to 'default')
 const transportName = ref('default')
 
+// Available transports fetched from the session: [{ uid, name }]
+const availableTransports = ref([])
+
 // Store the list of captured playhead positions
 const storedPositions = ref([])
 
@@ -154,6 +170,34 @@ const apiBase = () => {
   return directorEndpoint.startsWith('http://') || directorEndpoint.startsWith('https://')
     ? directorEndpoint
     : `http://${directorEndpoint}`
+}
+
+// Fetch the list of transports available in the session (read-only GET) and
+// populate the dropdown. Multitransports (multi-transport managers) are
+// intentionally excluded.
+const fetchTransports = async () => {
+  try {
+    const response = await fetch(`${apiBase()}/api/session/transport/transports`)
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    const data = await response.json()
+    const list = Array.isArray(data.transports) ? data.transports : []
+    availableTransports.value = list
+      .map(t => ({ uid: t.uid || '', name: t.name || '' }))
+      .filter(t => t.name)
+
+    // If the current selection isn't among the available transports, fall back
+    // to the first one so the dropdown always reflects a real transport.
+    if (
+      availableTransports.value.length &&
+      !availableTransports.value.some(t => t.name === transportName.value)
+    ) {
+      transportName.value = availableTransports.value[0].name
+    }
+  } catch (error) {
+    console.warn('Could not fetch transports:', error)
+  }
 }
 
 // Fetch the track currently loaded on the given transport (read-only GET).
@@ -455,6 +499,8 @@ const handleKeyPress = (event) => {
 // Set up and clean up keyboard event listener
 onMounted(() => {
   window.addEventListener('keydown', handleKeyPress)
+  // Populate the transport dropdown from the session
+  fetchTransports()
 })
 
 onUnmounted(() => {
@@ -546,6 +592,32 @@ body {
 .transport-input::placeholder {
   color: #757575;
   font-style: italic;
+}
+
+/* The transport selector is a <select>; let it grow and sit beside the
+   refresh button in the flex row. */
+select.transport-input {
+  flex: 1;
+  cursor: pointer;
+}
+
+.refresh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem 0.6rem;
+  background-color: #424242;
+  color: #e0e0e0;
+  border: 1px solid #616161;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.refresh-btn:hover {
+  background-color: #4a4a4a;
+  border-color: #757575;
 }
 
 .section-header {
