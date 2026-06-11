@@ -1,8 +1,44 @@
-# Vue 3 + Vite
+# Marker Madness
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+A Disguise Designer plugin for capturing playhead positions as named markers and
+jumping back to them on demand. Each marker remembers its transport and track, so
+you can recall a precise time — even in a different track — with a single click, a
+number-key shortcut, or the `` ` `` hotkey. Markers can be labelled, reordered, and
+imported/exported as YAML.
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+## Install the plugin (no coding needed)
+
+Follow these steps to install the latest ready-to-use version in Disguise
+Designer. You don't need to build anything or know how to use GitHub.
+
+1. **Download it.** Go to the
+   [latest release page](https://github.com/macswg/d3plg_marker_madness/releases/latest).
+   Under the **Assets** heading, click the file that ends in `.zip`
+   (for example `marker_madness-v1.0.0.zip`) to download it.
+2. **Unzip it.** Find the downloaded `.zip` file (usually in your Downloads
+   folder), right-click it, and choose **Extract All…** (Windows) or
+   double-click it (Mac). You'll get a folder named `marker_madness`.
+3. **Drop it into the d3 plugins folder.** Copy that whole `marker_madness`
+   folder into your Disguise project's **plugins** folder.
+4. **Load it in Designer.** Open (or restart) Disguise Designer and open the
+   plugin from the plugin launcher. Look for **Marker Madness** with its
+   playhead icon.
+
+To update later, just delete the old `marker_madness` folder and repeat the
+steps with the newest release.
+
+## Features
+
+- **Capture markers** at the current playhead position, each tagged with its
+  transport and track.
+- **Jump to a marker** with the *Go To* button — it seeks to the right track and
+  time even if it lives in a different track.
+- **Label markers** with free-text notes that are kept in import/export.
+- **Number-key shortcuts** (1–9) and a `` ` `` hotkey to capture/recall markers
+  hands-free.
+- **Reorder** markers by drag and drop.
+- **Import / export** the full marker list (position, transport, track, and
+  notes) as YAML.
 
 ## Disguise API reference
 
