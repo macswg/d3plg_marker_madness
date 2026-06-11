@@ -99,7 +99,7 @@
           <div class="position-value">
             <div class="position-header">
               <span class="position-index">{{ index + 1 }}</span>
-              <span class="position-seconds">{{ item.position.toFixed(2) }}s</span>
+              <span class="position-seconds">{{ item.timecode || item.position.toFixed(2) + 's' }}</span>
               <span class="position-transport">{{ item.track || '(no track)' }}</span>
             </div>
             <input 
@@ -225,7 +225,7 @@ const fetchCurrentTrack = async (transport) => {
 }
 
 // Function to capture the current playhead position (and the loaded track)
-const capturePosition = async (position, transport) => {
+const capturePosition = async (position, transport, timecode) => {
   if (position === undefined || position === null) {
     return
   }
@@ -237,6 +237,7 @@ const capturePosition = async (position, transport) => {
     transport: transportNameValue,
     track: track.name,
     trackUid: track.uid,
+    timecode: timecode || '',
     label: ''
   })
 }
@@ -382,6 +383,8 @@ const exportPositions = () => {
         transport: item.transport || 'default',
         track: item.track || '',
         trackUid: item.trackUid || '',
+        // The d3-computed timecode string shown for the marker
+        timecode: item.timecode || '',
         // The per-marker note shown in the UI label input
         label: item.label || ''
       }))
@@ -445,6 +448,7 @@ const importPositions = async (event) => {
       transport: pos.transport || 'default',
       track: pos.track || '',
       trackUid: pos.trackUid || '',
+      timecode: pos.timecode || '',
       label: pos.label || ''
     })
 
@@ -516,30 +520,27 @@ body {
 .app h1 {
   color: #ffffff;
   font-size: 1.5rem;
-  margin-bottom: 0.5rem;
+  margin-top: 0.3rem;
+  margin-bottom: 0.3rem;
   text-align: center;
 }
 
 .stored-positions-section {
-  margin: 0.5rem 0;
-  padding: 1rem;
+  margin: 0.3rem 0.5rem;
+  padding: 0.6rem 1rem;
   border: 1px solid #424242;
   border-radius: 4px;
   background-color: #1e1e1e;
   color: #e0e0e0;
-  margin-left: 0.5rem;
-  margin-right: 0.5rem;
 }
 
 .transport-config-section {
-  margin: 0.5rem 0;
-  padding: 0.75rem 1rem;
+  margin: 0.3rem 0.5rem;
+  padding: 0.5rem 1rem;
   border: 1px solid #424242;
   border-radius: 4px;
   background-color: #1e1e1e;
   color: #e0e0e0;
-  margin-left: 0.5rem;
-  margin-right: 0.5rem;
 }
 
 .transport-input-group {
@@ -610,7 +611,7 @@ select.transport-input {
   display: flex;
   justify-content: center;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0.6rem;
   flex-wrap: wrap;
   gap: 1rem;
 }
@@ -871,8 +872,8 @@ select.transport-input {
 
   .transport-config-section,
   .stored-positions-section {
-    margin-top: 0.5rem;
-    margin-bottom: 0.5rem;
+    margin-top: 0.3rem;
+    margin-bottom: 0.3rem;
     margin-left: 0;
     margin-right: 0;
   }

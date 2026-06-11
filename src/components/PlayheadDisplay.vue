@@ -5,7 +5,7 @@
       <div class="playhead-header">
         <button @click="handleCapture" class="capture-btn">Add Marker</button>
         <span class="playhead-label">Playhead Position</span>
-        <span class="time-seconds">{{ player_tRender !== undefined ? player_tRender.toFixed(2) : '0.00' }}s</span>
+        <span class="time-code">{{ timecode || '--:--:--:--' }}</span>
       </div>
    </div>
 </template>
@@ -37,14 +37,24 @@
   const transportNameValue = props.transportName || 'default'
   const transportManagerKey = `transportManager:${transportNameValue}`
   
-  // Auto-subscribe to playhead position
+  // Auto-subscribe to playhead position (seconds) — the canonical value used
+  // for capturing markers and seeking.
   const { player_tRender } = props.liveUpdate.autoSubscribe(transportManagerKey, ['object.player.tRender'])
+
+  // Subscribe to the d3-computed timecode for display. d3 evaluates this on the
+  // server, baking in the timeline's TC tags, offset starts, tag regions, and
+  // frame rate, so it matches d3's own transport readout exactly. autoSubscribe
+  // can't name a compound expression, so we use subscribe() with an explicit name.
+  const { timecode } = props.liveUpdate.subscribe(transportManagerKey, {
+    timecode:
+      'object.beatToTimecode(object.player.track.timeToBeat(object.player.tRender)).__str__()'
+  })
 
   // Handle capture button click
   const handleCapture = () => {
     console.log('Capture button clicked, player_tRender:', player_tRender.value)
     if (player_tRender.value !== undefined) {
-      emit('capture-position', player_tRender.value, transportNameValue)
+      emit('capture-position', player_tRender.value, transportNameValue, timecode.value)
       console.log('Emitted capture-position event with value:', player_tRender.value)
     } else {
       console.warn('player_tRender is undefined, cannot capture position')
@@ -71,10 +81,8 @@
   
 <style scoped>
   .playhead-section {
-    margin: 0.5rem 0;
-    margin-left: 0.5rem;
-    margin-right: 0.5rem;
-    padding: 1rem;
+    margin: 0.3rem 0.5rem;
+    padding: 0.6rem 1rem;
     border: 1px solid #424242;
     border-radius: 4px;
     background-color: #1e1e1e;
@@ -94,7 +102,7 @@
     font-weight: normal;
   }
 
-  .time-seconds {
+  .time-code {
     font-size: 0.9rem;
     font-weight: normal;
     color: #ffffff;
@@ -119,8 +127,8 @@
   /* Mobile styles - reduce horizontal margins for maximum width */
   @media (max-width: 768px) {
     .playhead-section {
-      margin-top: 0.5rem;
-      margin-bottom: 0.5rem;
+      margin-top: 0.3rem;
+      margin-bottom: 0.3rem;
       margin-left: 0;
       margin-right: 0;
     }
