@@ -370,33 +370,19 @@ const goToPosition = async (marker) => {
 // Function to export stored positions as YAML
 const exportPositions = () => {
   try {
-    // Prompt user for filename
-    const defaultFilename = `marker-positions-${new Date().toISOString().split('T')[0]}`
-    const userFilename = prompt('Enter filename for export:', defaultFilename)
-    
-    // If user cancelled, exit
-    if (userFilename === null) {
-      return
-    }
-    
-    // Clean the filename (remove invalid characters and ensure .yaml extension)
-    let filename = userFilename.trim()
-    if (!filename) {
-      filename = defaultFilename
-    }
-    // Remove any invalid filename characters
-    filename = filename.replace(/[<>:"/\\|?*]/g, '')
-    // Ensure it ends with .yaml
-    if (!filename.toLowerCase().endsWith('.yaml') && !filename.toLowerCase().endsWith('.yml')) {
-      filename += '.yaml'
-    }
-    
+    // Build the filename directly. We deliberately avoid prompt() here: inside
+    // the Disguise plugin host the panel runs in a sandboxed webview where
+    // window.prompt() is blocked and returns null, which silently aborted the
+    // export. A fixed, dated filename works in both the plugin and a browser.
+    const filename = `marker-positions-${new Date().toISOString().split('T')[0]}.yaml`
+
     const data = {
       positions: storedPositions.value.map(item => ({
         position: item.position,
         transport: item.transport || 'default',
         track: item.track || '',
         trackUid: item.trackUid || '',
+        // The per-marker note shown in the UI label input
         label: item.label || ''
       }))
     }
