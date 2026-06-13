@@ -8,9 +8,11 @@
     </div>
 
     <p class="cleanup-intro">
-      Pull every note and cue from all tracks in the session, tick the ones to
-      remove, then delete. TC (timecode) tags are shown for context but can't be
-      deleted. Pulled cues are never sent back to d3 to protect original cue timing.
+      Pull every note and cue from all tracks in the session. Rename a note or
+      cue number in place (✎) — edits are saved back at the same beat, so cue
+      timing never moves. Tick items and delete the ones you don't want. TC
+      (timecode) tags are shown for context but can't be edited or deleted, and
+      nothing is rewritten except the items you change.
     </p>
 
     <!-- Search + selection controls (only meaningful once data is pulled) -->
