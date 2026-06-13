@@ -57,6 +57,13 @@
           >
             {{ numberKeysArmed ? 'Num Keys ON' : 'Num Keys OFF' }}
           </button>
+          <input
+            type="text"
+            v-model="notePrefix"
+            placeholder="Note prefix"
+            class="note-prefix-input"
+            title="Prepended (with an underscore) to every note sent to d3, e.g. SHOW_ -> SHOW_cue1"
+          />
           <button @click="sendNotesToD3" class="send-d3-btn" title="Send markers to d3 as timeline notes">
             Send to d3
           </button>
@@ -164,6 +171,11 @@ const numberKeysArmed = ref(false)
 
 // State for the marker hotkey (` to add a marker)
 const markerKeyArmed = ref(false)
+
+// Global prefix applied to every note written to d3, so plugin-added notes can
+// be told apart from manually-added ones. A '_' is appended after the
+// user-typed prefix, e.g. prefix "SHOW" -> note "SHOW_<label>".
+const notePrefix = ref('')
 
 // State for drag and drop reordering
 const draggedIndex = ref(null)
@@ -410,6 +422,10 @@ const sendNotesToD3 = async () => {
     return
   }
 
+  // Prefix to distinguish plugin-added notes from manual ones. When set, each
+  // note becomes "<prefix>_<label>".
+  const prefix = notePrefix.value.trim()
+
   // Group markers by the track they belong to.
   const byTrack = new Map()
   for (const m of writable) {
@@ -417,7 +433,8 @@ const sendNotesToD3 = async () => {
     if (!byTrack.has(key)) {
       byTrack.set(key, { uid: m.trackUid || '', notes: [] })
     }
-    byTrack.get(key).notes.push({ beat: m.beat, note: m.label })
+    const note = prefix ? `${prefix}_${m.label}` : m.label
+    byTrack.get(key).notes.push({ beat: m.beat, note })
   }
 
   // Build a Python 2.7 script that resolves each track and sets its notes.
@@ -798,6 +815,28 @@ select.transport-input {
   cursor: pointer;
   font-size: 0.9rem;
   transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.note-prefix-input {
+  width: 9rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #e0e0e0;
+  background-color: #2a2a2a;
+  font-family: inherit;
+  transition: border-color 0.2s ease;
+}
+
+.note-prefix-input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.note-prefix-input::placeholder {
+  color: #757575;
+  font-style: italic;
 }
 
 .send-d3-btn {
