@@ -67,7 +67,7 @@
           <button @click="sendNotesToD3" class="send-d3-btn" title="Send markers to d3 as timeline notes">
             Send to d3
           </button>
-          <button @click="exportPositions" class="export-btn" title="Export YAML" aria-label="Export YAML">
+          <button @click="exportPositions" class="export-btn" title="Copy positions as YAML" aria-label="Copy positions as YAML">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 3v12" />
               <path d="M7 10l5 5 5-5" />
@@ -90,6 +90,7 @@
           />
         </div>
       </div>
+      <div v-if="copyStatus" class="copy-status">{{ copyStatus }}</div>
       <div v-if="storedPositions.length === 0" class="empty-message">
         No positions captured yet. Click "Capture Position" to add one.
       </div>
@@ -127,6 +128,27 @@
       </ul>
     </div>
     
+    <!-- Manual-copy fallback: shown only when the clipboard is blocked by the
+         sandbox. The user select-alls the YAML and copies it by hand. -->
+    <div v-if="exportText" class="export-overlay" @click.self="closeExportOverlay">
+      <div class="export-panel">
+        <div class="export-panel-header">
+          <span>Copy this YAML</span>
+          <span class="export-panel-hint">Clipboard was blocked — select all and copy manually</span>
+        </div>
+        <textarea
+          ref="exportTextarea"
+          class="export-panel-text"
+          readonly
+          :value="exportText"
+        ></textarea>
+        <div class="export-panel-buttons">
+          <button @click="copyExportText" class="send-d3-btn">Copy</button>
+          <button @click="closeExportOverlay" class="remove-btn">Close</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Display connection status -->
     <LiveUpdateOverlay :liveUpdate="liveUpdate" />
 
@@ -139,7 +161,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useLiveUpdate, LiveUpdateOverlay } from '@disguise-one/vue-liveupdate'
 import PlayheadDisplay from './components/PlayheadDisplay.vue'
 import { dump, load } from 'js-yaml'
@@ -191,6 +213,21 @@ const storedPositions = ref(Array.isArray(restoredPositions) ? restoredPositions
 
 // Ref for file input element
 const fileInput = ref(null)
+
+// Transient status line shown under the toolbar (e.g. "Copied 3 position(s)").
+const copyStatus = ref('')
+let copyStatusTimer = null
+const flashStatus = (message) => {
+  copyStatus.value = message
+  if (copyStatusTimer) clearTimeout(copyStatusTimer)
+  copyStatusTimer = setTimeout(() => { copyStatus.value = '' }, 3000)
+}
+
+// When the clipboard is unavailable (sandboxed webview blocks both the async
+// Clipboard API and execCommand), we surface the YAML in this overlay so the
+// user can select-all and copy it manually. Non-empty => overlay visible.
+const exportText = ref('')
+const exportTextarea = ref(null)
 
 // State for number key shortcuts (1-9 to jump to markers)
 const numberKeysArmed = ref(false)
@@ -504,45 +541,97 @@ const sendNotesToD3 = async () => {
   }
 }
 
-// Function to export stored positions as YAML
-const exportPositions = () => {
-  try {
-    // Build the filename directly. We deliberately avoid prompt() here: inside
-    // the Disguise plugin host the panel runs in a sandboxed webview where
-    // window.prompt() is blocked and returns null, which silently aborted the
-    // export. A fixed, dated filename works in both the plugin and a browser.
-    const filename = `marker-positions-${new Date().toISOString().split('T')[0]}.yaml`
-
-    const data = {
-      positions: storedPositions.value.map(item => ({
-        position: item.position,
-        transport: item.transport || 'default',
-        track: item.track || '',
-        trackUid: item.trackUid || '',
-        // The d3-computed timecode string shown for the marker
-        timecode: item.timecode || '',
-        // The d3 timeline beat at capture time (used for setNoteAtBeat)
-        beat: typeof item.beat === 'number' ? item.beat : null,
-        // The per-marker note shown in the UI label input
-        label: item.label || ''
-      }))
-    }
-    
-    const yamlString = dump(data, { indent: 2 })
-    const blob = new Blob([yamlString], { type: 'application/x-yaml' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    console.log('Positions exported successfully')
-  } catch (error) {
-    console.error('Error exporting positions:', error)
-    alert('Failed to export positions. Please check the console for details.')
+// Serialize the stored positions to a Marker Madness YAML string.
+const buildExportYaml = () => {
+  const data = {
+    positions: storedPositions.value.map(item => ({
+      position: item.position,
+      transport: item.transport || 'default',
+      track: item.track || '',
+      trackUid: item.trackUid || '',
+      // The d3-computed timecode string shown for the marker
+      timecode: item.timecode || '',
+      // The d3 timeline beat at capture time (used for setNoteAtBeat)
+      beat: typeof item.beat === 'number' ? item.beat : null,
+      // The per-marker note shown in the UI label input
+      label: item.label || ''
+    }))
   }
+  return dump(data, { indent: 2 })
+}
+
+// Copy text to the clipboard, returning whether it succeeded. d3's CEF webview
+// never accepts file downloads, so "export" is a clipboard copy. We try the
+// modern async Clipboard API first, then fall back to a hidden <textarea> +
+// execCommand('copy') for older/locked-down hosts.
+const copyText = async (text) => {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch (error) {
+    console.warn('Clipboard API write failed, trying execCommand fallback:', error)
+  }
+
+  try {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    // Keep it off-screen but selectable.
+    textarea.style.position = 'fixed'
+    textarea.style.top = '-9999px'
+    textarea.style.opacity = '0'
+    document.body.appendChild(textarea)
+    textarea.focus()
+    textarea.select()
+    const ok = document.execCommand('copy')
+    document.body.removeChild(textarea)
+    return ok
+  } catch (error) {
+    console.warn('execCommand copy fallback failed:', error)
+    return false
+  }
+}
+
+// "Export" the stored positions by copying their YAML to the clipboard. If both
+// clipboard paths are blocked, open the manual-copy overlay as a last resort.
+const exportPositions = async () => {
+  let yamlString
+  try {
+    yamlString = buildExportYaml()
+  } catch (error) {
+    console.error('Error serializing positions:', error)
+    flashStatus('Failed to export positions (see console).')
+    return
+  }
+
+  const count = storedPositions.value.length
+  if (await copyText(yamlString)) {
+    flashStatus(`Copied ${count} position(s) as YAML.`)
+  } else {
+    // Couldn't copy programmatically — show the YAML for manual select-and-copy.
+    exportText.value = yamlString
+    await nextTick()
+    exportTextarea.value?.focus()
+    exportTextarea.value?.select()
+  }
+}
+
+// Retry the copy from inside the manual-copy overlay.
+const copyExportText = async () => {
+  if (await copyText(exportText.value)) {
+    flashStatus('Copied to clipboard.')
+    exportText.value = ''
+  } else {
+    // Still blocked: re-select so the user can Ctrl+C themselves.
+    exportTextarea.value?.focus()
+    exportTextarea.value?.select()
+  }
+}
+
+// Close the manual-copy overlay.
+const closeExportOverlay = () => {
+  exportText.value = ''
 }
 
 // Function to trigger file input for import
@@ -634,6 +723,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyPress)
+  if (copyStatusTimer) clearTimeout(copyStatusTimer)
 })
 </script>
 
@@ -885,6 +975,70 @@ select.transport-input {
 .send-d3-btn:hover {
   background-color: #1565c0;
   border-color: #0d47a1;
+}
+
+.copy-status {
+  text-align: center;
+  color: #81c784;
+  font-size: 0.85rem;
+  margin: 0 0 0.4rem;
+}
+
+.export-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 1000;
+}
+
+.export-panel {
+  width: 100%;
+  max-width: 640px;
+  background-color: #1e1e1e;
+  border: 1px solid #424242;
+  border-radius: 6px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.export-panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: #ffffff;
+  font-size: 1rem;
+}
+
+.export-panel-hint {
+  color: #9e9e9e;
+  font-size: 0.8rem;
+  font-style: italic;
+}
+
+.export-panel-text {
+  width: 100%;
+  height: 40vh;
+  resize: vertical;
+  padding: 0.6rem;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  background-color: #121212;
+  color: #e0e0e0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  white-space: pre;
+}
+
+.export-panel-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .export-btn:hover {
