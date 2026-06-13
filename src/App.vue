@@ -57,13 +57,6 @@
           >
             {{ numberKeysArmed ? 'Num Keys ON' : 'Num Keys OFF' }}
           </button>
-          <input
-            type="text"
-            v-model="notePrefix"
-            placeholder="Note prefix"
-            class="note-prefix-input"
-            title="Prepended (with an underscore) to every note sent to d3, e.g. SHOW_ -> SHOW_cue1"
-          />
           <button @click="sendNotesToD3" class="send-d3-btn" title="Send markers to d3 as timeline notes">
             Send to d3
           </button>
@@ -91,6 +84,16 @@
             style="display: none"
           />
         </div>
+      </div>
+      <div class="note-prefix-row">
+        <input
+          type="text"
+          v-model="notePrefix"
+          placeholder="Note prefix"
+          class="note-prefix-input"
+          title="Prepended (with an underscore) to every note sent to d3, e.g. SHOW_ -> SHOW_cue1"
+        />
+        <span class="note-prefix-hint">Prepended (with an underscore) to every note sent to d3, e.g. SHOW_ → SHOW_cue1</span>
       </div>
       <div v-if="copyStatus" class="copy-status">{{ copyStatus }}</div>
       <div v-if="storedPositions.length === 0" class="empty-message">
@@ -885,7 +888,7 @@ select.transport-input {
 
 .section-header {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
   margin-bottom: 0.6rem;
   flex-wrap: wrap;
@@ -902,7 +905,20 @@ select.transport-input {
 .import-export-buttons {
   display: flex;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+.note-prefix-row {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.note-prefix-hint {
+  font-size: 0.72rem;
+  color: #9e9e9e;
 }
 
 .number-keys-btn {
