@@ -415,7 +415,7 @@ const sendNotesToD3 = async () => {
   for (const m of writable) {
     const key = m.trackUid || m.track || ''
     if (!byTrack.has(key)) {
-      byTrack.set(key, { uid: m.trackUid || '', name: m.track || '', notes: [] })
+      byTrack.set(key, { uid: m.trackUid || '', notes: [] })
     }
     byTrack.get(key).notes.push({ beat: m.beat, note: m.label })
   }
