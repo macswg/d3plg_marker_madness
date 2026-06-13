@@ -57,6 +57,9 @@
           >
             {{ numberKeysArmed ? 'Num Keys ON' : 'Num Keys OFF' }}
           </button>
+          <button @click="sendNotesToD3" class="send-d3-btn" title="Send markers to d3 as timeline notes">
+            Send to d3
+          </button>
           <button @click="exportPositions" class="export-btn" title="Export YAML" aria-label="Export YAML">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 3v12" />
@@ -368,6 +371,87 @@ const goToPosition = async (marker) => {
     console.log(`Successfully moved to ${position.toFixed(2)}s on track "${marker.track || '(none)'}"`)
   } catch (error) {
     console.error('Error moving playhead:', error)
+  }
+}
+
+// POST a block of Python to the director and verify it ran. The execute API
+// returns { status, d3Log, pythonLog, returnValue }; a non-zero status.code
+// means the script raised. NOTE: scripts run as Python 2.7 on the server.
+const executePython = async (script) => {
+  const response = await fetch(`${apiBase()}/api/session/python/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script })
+  })
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`)
+  }
+
+  const result = await response.json()
+  if (result.status && result.status.code !== 0) {
+    throw new Error(`Python execute failed: ${result.status.message || JSON.stringify(result.status)}`)
+  }
+  return result
+}
+
+// Send the stored markers to d3 as timeline notes. Each marker carries the
+// beat it was captured at, so we write it directly with track.setNoteAtBeat()
+// — no time->beat conversion needed. Markers are grouped by track so each note
+// lands on the track it was captured on, loaded by uid (preferred) or name.
+const sendNotesToD3 = async () => {
+  // Only markers that have both a beat and a label are meaningful as notes.
+  const writable = storedPositions.value.filter(
+    m => typeof m.beat === 'number' && (m.label || '').trim() !== ''
+  )
+
+  if (writable.length === 0) {
+    console.warn('No markers with a beat and a label to send.')
+    return
+  }
+
+  // Group markers by the track they belong to.
+  const byTrack = new Map()
+  for (const m of writable) {
+    const key = m.trackUid || m.track || ''
+    if (!byTrack.has(key)) {
+      byTrack.set(key, { uid: m.trackUid || '', name: m.track || '', notes: [] })
+    }
+    byTrack.get(key).notes.push({ beat: m.beat, note: m.label })
+  }
+
+  // Build a Python 2.7 script that resolves each track and sets its notes.
+  // Values are JSON-encoded so strings are safely escaped inside the Python
+  // source. A track is resolved by its UID (UidManager) when we have one,
+  // otherwise we fall back to the director's currently-loaded track.
+  const groups = Array.from(byTrack.values())
+  const script = [
+    'import json',
+    `groups = json.loads(${JSON.stringify(JSON.stringify(groups))})`,
+    'uidMgr = UidManager.get()',
+    'written = 0',
+    'for g in groups:',
+    '    track = None',
+    "    if g['uid']:",
+    '        try:',
+    "            track = uidMgr.getResource(int(g['uid']))",
+    '        except Exception:',
+    '            track = None',
+    '    if track is None:',
+    '        track = state.localOrDirectorState().track',
+    '    if track is None:',
+    '        continue',
+    "    for n in g['notes']:",
+    "        track.setNoteAtBeat(float(n['beat']), n['note'])",
+    '        written += 1',
+    'return written'
+  ].join('\n')
+
+  try {
+    const result = await executePython(script)
+    console.log(`Sent ${writable.length} note(s) to d3. returnValue:`, result.returnValue)
+  } catch (error) {
+    console.error('Error sending notes to d3:', error)
   }
 }
 
@@ -714,6 +798,22 @@ select.transport-input {
   cursor: pointer;
   font-size: 0.9rem;
   transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.send-d3-btn {
+  padding: 0.5rem 1rem;
+  background-color: #1976d2;
+  color: white;
+  border: 1px solid #1565c0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.send-d3-btn:hover {
+  background-color: #1565c0;
+  border-color: #0d47a1;
 }
 
 .export-btn:hover {
