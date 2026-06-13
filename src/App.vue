@@ -67,12 +67,13 @@
           <button @click="sendNotesToD3" class="send-d3-btn" title="Send markers to d3 as timeline notes">
             Send to d3
           </button>
-          <button @click="exportPositions" class="export-btn" title="Copy positions as YAML" aria-label="Copy positions as YAML">
+          <button @click="exportPositions" class="export-btn" title="Copy positions as YAML" aria-label="Copy YAML">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 3v12" />
               <path d="M7 10l5 5 5-5" />
               <path d="M5 21h14" />
             </svg>
+            Copy YAML
           </button>
           <button @click="openImport" class="import-btn" title="Import YAML (paste)" aria-label="Import YAML">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -80,6 +81,7 @@
               <path d="M7 14l5-5 5 5" />
               <path d="M5 3h14" />
             </svg>
+            Import YAML
           </button>
           <input
             ref="fileInput"
@@ -974,6 +976,7 @@ select.transport-input {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.4rem;
   padding: 0.5rem 0.6rem;
   background-color: #424242;
   color: #e0e0e0;
