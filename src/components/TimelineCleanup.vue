@@ -66,31 +66,64 @@
                 <span class="cleanup-badge badge-tc">TC</span>
                 <span class="cleanup-text">{{ tag.text }}</span>
               </div>
-              <label v-else class="cleanup-element">
+              <div v-else class="cleanup-element">
                 <input
                   type="checkbox"
                   :checked="isSelected(tagKey(track.uid, cue.beat, tag.type))"
                   @change="toggle(tagKey(track.uid, cue.beat, tag.type))"
                 />
-                <!-- CUE tags use a d3-style beveled chip; MIDI keeps a badge -->
-                <span v-if="tag.type === CUE_TYPE" class="cue-chip">CUE {{ tag.text }}</span>
+                <!-- CUE tags use a d3-style beveled chip and can be renumbered;
+                     MIDI keeps a read-only badge. -->
+                <template v-if="tag.type === CUE_TYPE">
+                  <template v-if="editingKey === tagKey(track.uid, cue.beat, CUE_TYPE)">
+                    <input
+                      class="cleanup-edit-input cue-edit"
+                      :value="editValue"
+                      @input="editValue = sanitizeCueNumber($event.target.value)"
+                      @keyup.enter="!isSaveDisabled && saveRename(track, cue, tag)"
+                      @keyup.esc="cancelEdit"
+                      inputmode="decimal"
+                      placeholder="Cue #"
+                    />
+                    <button class="edit-action" :disabled="isSaveDisabled || saving" @click="saveRename(track, cue, tag)">Save</button>
+                    <button class="edit-action cancel" :disabled="saving" @click="cancelEdit">Cancel</button>
+                  </template>
+                  <template v-else>
+                    <span class="cue-chip">CUE {{ tag.text }}</span>
+                    <button class="edit-btn" title="Rename cue number" @click="startEdit(tagKey(track.uid, cue.beat, CUE_TYPE), tag.text)">✎</button>
+                  </template>
+                </template>
                 <template v-else>
                   <span class="cleanup-badge badge-midi">{{ tagTypeLabel(tag.type) }}</span>
                   <span class="cleanup-text">{{ tag.text }}</span>
                 </template>
-              </label>
+              </div>
             </template>
 
             <!-- Note below the tags -->
-            <label v-if="cue.note" class="cleanup-element">
+            <div v-if="cue.note" class="cleanup-element">
               <input
                 type="checkbox"
                 :checked="isSelected(noteKey(track.uid, cue.beat))"
                 @change="toggle(noteKey(track.uid, cue.beat))"
               />
               <span class="cleanup-badge badge-note">NOTE</span>
-              <span class="cleanup-text">{{ cue.note }}</span>
-            </label>
+              <template v-if="editingKey === noteKey(track.uid, cue.beat)">
+                <input
+                  class="cleanup-edit-input"
+                  v-model="editValue"
+                  @keyup.enter="!isSaveDisabled && saveRename(track, cue, null)"
+                  @keyup.esc="cancelEdit"
+                  placeholder="Note text"
+                />
+                <button class="edit-action" :disabled="isSaveDisabled || saving" @click="saveRename(track, cue, null)">Save</button>
+                <button class="edit-action cancel" :disabled="saving" @click="cancelEdit">Cancel</button>
+              </template>
+              <template v-else>
+                <span class="cleanup-text">{{ cue.note }}</span>
+                <button class="edit-btn" title="Rename note" @click="startEdit(noteKey(track.uid, cue.beat), cue.note)">✎</button>
+              </template>
+            </div>
           </div>
         </li>
       </ul>
@@ -161,6 +194,16 @@ const statusMsg = ref('')
 const error = ref('')
 const confirming = ref(false)
 const searchQuery = ref('')
+
+// Inline rename state: the key of the single element being edited and its
+// working value. `saving` blocks the buttons while a write is in flight.
+const editingKey = ref(null)
+const editValue = ref('')
+const saving = ref(false)
+
+// Cue numbers follow d3's schema X, X.Y, X.Y.Z (digits in dot-separated groups).
+const CUE_NUMBER_RE = /^\d+(\.\d+)*$/
+const sanitizeCueNumber = (value) => (value || '').replace(/[^\d.]/g, '')
 
 const tagTypeLabel = (type) => (type === CUE_TYPE ? 'CUE' : type === MIDI_TYPE ? 'MIDI' : 'TC')
 
@@ -244,12 +287,94 @@ const clearSelection = () => {
   selected.value = new Set()
 }
 
+// --- Inline rename (notes & cue numbers) ---------------------------------
+
+// True when the current edit value can't be saved: empty for a note, or not a
+// valid cue number for a cue (key ends with the CUE tag suffix).
+const isSaveDisabled = computed(() => {
+  const v = (editValue.value || '').trim()
+  if (editingKey.value && editingKey.value.endsWith(`tag:${CUE_TYPE}`)) {
+    return !CUE_NUMBER_RE.test(v)
+  }
+  return v === ''
+})
+
+const startEdit = (key, currentValue) => {
+  editingKey.value = key
+  editValue.value = currentValue || ''
+}
+
+const cancelEdit = () => {
+  editingKey.value = null
+  editValue.value = ''
+}
+
+// Rename a note (tag === null) or a cue number in place. Writing at the same
+// beat overrides that element and leaves the cue's position unchanged.
+const saveRename = async (track, cue, tag) => {
+  if (isSaveDisabled.value || saving.value) {
+    return
+  }
+  const kind = tag ? 'cue' : 'note'
+  const text = (editValue.value || '').trim()
+  const payload = { uid: track.uid, beat: cue.beat, kind, text }
+
+  saving.value = true
+  error.value = ''
+  statusMsg.value = ''
+  const script = [
+    'import json',
+    `p = json.loads(${JSON.stringify(JSON.stringify(payload))})`,
+    'try:',
+    "    track = UidManager.get().getResource(int(p['uid']))",
+    '    if track is None:',
+    '        out = {"ok": False, "error": "track not found"}',
+    '    else:',
+    "        if p['kind'] == 'note':",
+    "            track.setNoteAtBeat(float(p['beat']), p['text'])",
+    '        else:',
+    "            track.setTagAtBeat(float(p['beat']), Tag(Tag.CUE, p['text']))",
+    '        out = {"ok": True}',
+    'except Exception as e:',
+    '    out = {"ok": False, "error": str(e)}',
+    'return out'
+  ].join('\n')
+
+  try {
+    const result = await executePythonVerbose(props.directorEndpoint, script)
+    let data = result.returnValue
+    if (typeof data === 'string') {
+      data = data.trim() === '' ? {} : JSON.parse(data)
+    }
+    data = data || {}
+    if (data.ok === false) {
+      throw new Error(data.error || 'Rename failed')
+    }
+    // Update local state in place so the list reflects the change without a
+    // re-pull (keeps selection and scroll position).
+    if (kind === 'note') {
+      cue.note = text
+    } else {
+      tag.text = text
+    }
+    statusMsg.value = kind === 'note' ? 'Note renamed.' : 'Cue number updated.'
+    editingKey.value = null
+    editValue.value = ''
+  } catch (err) {
+    console.error('Error renaming in d3:', err)
+    error.value = `Could not rename: ${err.message}`
+  } finally {
+    saving.value = false
+  }
+}
+
 // Pull every note and cue from all tracks in the session.
 const pull = async () => {
   loading.value = true
   error.value = ''
   statusMsg.value = ''
   confirming.value = false
+  editingKey.value = null
   // Notes on the d3 execute environment:
   //  - The runner's return value is serialised to JSON by d3, so we return a
   //    raw object (no json.dumps, which would double-encode).
@@ -580,6 +705,46 @@ const confirmDelete = async () => {
 }
 
 .cleanup-text { color: #e0e0e0; word-break: break-word; }
+
+/* Inline rename: pencil button shown on each note/cue, and the edit field. */
+.edit-btn {
+  background: none;
+  border: none;
+  color: #757575;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0 0.25rem;
+  line-height: 1;
+}
+.edit-btn:hover { color: #64b5f6; }
+
+.cleanup-edit-input {
+  padding: 0.2rem 0.4rem;
+  border: 2px solid #424242;
+  border-radius: 4px;
+  background-color: #121212;
+  color: #e0e0e0;
+  font-family: inherit;
+  font-size: 0.85rem;
+  min-width: 12rem;
+}
+.cleanup-edit-input.cue-edit { min-width: 5rem; width: 5rem; text-align: center; }
+.cleanup-edit-input:focus { outline: none; border-color: #64b5f6; }
+
+.edit-action {
+  padding: 0.2rem 0.6rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 0.8rem;
+  background-color: #1976d2;
+  color: #fff;
+}
+.edit-action:hover:not(:disabled) { background-color: #1565c0; }
+.edit-action:disabled { background-color: #37474f; cursor: default; opacity: 0.7; }
+.edit-action.cancel { background-color: #424242; }
+.edit-action.cancel:hover:not(:disabled) { background-color: #525252; }
 
 .cleanup-delete-bar {
   display: flex;
