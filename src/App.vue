@@ -139,7 +139,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useLiveUpdate, LiveUpdateOverlay } from '@disguise-one/vue-liveupdate'
 import PlayheadDisplay from './components/PlayheadDisplay.vue'
 import { dump, load } from 'js-yaml'
@@ -160,8 +160,34 @@ const transportName = ref('default')
 // Available transports fetched from the session: [{ uid, name }]
 const availableTransports = ref([])
 
-// Store the list of captured playhead positions
-const storedPositions = ref([])
+// localStorage keys for persisting state across plugin reloads
+const STORAGE_KEY_POSITIONS = 'markerMadness.positions'
+const STORAGE_KEY_PREFIX = 'markerMadness.notePrefix'
+
+// Read a persisted value from localStorage, tolerating the sandboxed webview
+// where storage may be unavailable or empty.
+const loadStored = (key, fallback) => {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw === null ? fallback : JSON.parse(raw)
+  } catch (error) {
+    console.warn(`Could not load "${key}" from localStorage:`, error)
+    return fallback
+  }
+}
+
+// Write a value to localStorage, ignoring failures (private mode, quota, etc.)
+const saveStored = (key, value) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch (error) {
+    console.warn(`Could not save "${key}" to localStorage:`, error)
+  }
+}
+
+// Store the list of captured playhead positions (restored from localStorage)
+const restoredPositions = loadStored(STORAGE_KEY_POSITIONS, [])
+const storedPositions = ref(Array.isArray(restoredPositions) ? restoredPositions : [])
 
 // Ref for file input element
 const fileInput = ref(null)
@@ -175,7 +201,13 @@ const markerKeyArmed = ref(false)
 // Global prefix applied to every note written to d3, so plugin-added notes can
 // be told apart from manually-added ones. A '_' is appended after the
 // user-typed prefix, e.g. prefix "SHOW" -> note "SHOW_<label>".
-const notePrefix = ref('')
+const restoredPrefix = loadStored(STORAGE_KEY_PREFIX, '')
+const notePrefix = ref(typeof restoredPrefix === 'string' ? restoredPrefix : '')
+
+// Persist markers and prefix to localStorage whenever they change so they
+// survive plugin reloads. Deep-watch positions since labels/order mutate.
+watch(storedPositions, value => saveStored(STORAGE_KEY_POSITIONS, value), { deep: true })
+watch(notePrefix, value => saveStored(STORAGE_KEY_PREFIX, value))
 
 // State for drag and drop reordering
 const draggedIndex = ref(null)
