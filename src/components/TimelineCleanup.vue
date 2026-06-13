@@ -10,7 +10,7 @@
     <p class="cleanup-intro">
       Pull every note and cue from all tracks in the session, tick the ones to
       remove, then delete. TC (timecode) tags are shown for context but can't be
-      deleted. Pulled cues are never sent back to d3 — this page only deletes.
+      deleted. Pulled cues are never sent back to d3 to protect original cue timing.
     </p>
 
     <!-- Search + selection controls (only meaningful once data is pulled) -->
