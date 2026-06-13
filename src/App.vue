@@ -91,9 +91,9 @@
           v-model="notePrefix"
           placeholder="Note prefix"
           class="note-prefix-input"
-          title="Prepended (with an underscore) to every note sent to d3, e.g. SHOW_ -> SHOW_cue1"
+          title="Prepended (with an underscore) to every note sent to d3, e.g. @_ -> @_cue1"
         />
-        <span class="note-prefix-hint">Prepended (with an underscore) to every note sent to d3, e.g. SHOW_ → SHOW_cue1</span>
+        <span class="note-prefix-hint">Prepended (with an underscore) to every note sent to d3, e.g. @_ → @_cue1</span>
       </div>
       <div v-if="copyStatus" class="copy-status">{{ copyStatus }}</div>
       <div v-if="storedPositions.length === 0" class="empty-message">
