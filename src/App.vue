@@ -1,7 +1,25 @@
 <template>
   <div class="app">
     <h1>Marker Madness Plugin</h1>
-    
+
+    <!-- Page navigation -->
+    <nav class="page-nav">
+      <button
+        :class="['page-nav-btn', { active: currentPage === 'markers' }]"
+        @click="currentPage = 'markers'"
+      >
+        Markers
+      </button>
+      <button
+        :class="['page-nav-btn', { active: currentPage === 'cleanup' }]"
+        @click="currentPage = 'cleanup'"
+      >
+        Timeline Cleanup
+      </button>
+    </nav>
+
+    <!-- Markers page: capture playhead positions and send them to d3 -->
+    <template v-if="currentPage === 'markers'">
     <!-- Transport Selection -->
     <div class="transport-config-section">
       <div class="transport-input-group">
@@ -189,6 +207,10 @@
         </div>
       </div>
     </div>
+    </template>
+
+    <!-- Timeline Cleanup page: pull all notes/cues from d3 and delete chosen ones -->
+    <TimelineCleanup v-else :directorEndpoint="directorEndpoint" />
 
     <!-- Display connection status -->
     <LiveUpdateOverlay :liveUpdate="liveUpdate" />
@@ -205,8 +227,10 @@
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useLiveUpdate, LiveUpdateOverlay } from '@disguise-one/vue-liveupdate'
 import PlayheadDisplay from './components/PlayheadDisplay.vue'
+import TimelineCleanup from './components/TimelineCleanup.vue'
 import { dump, load } from 'js-yaml'
 import { version } from '../package.json'
+import { apiBase as buildApiBase, executePython as runPython } from './d3Api.js'
 
 // Extract the director endpoint from the URL query parameters
 const urlParams = new URLSearchParams(window.location.search)
@@ -226,6 +250,7 @@ const availableTransports = ref([])
 // localStorage keys for persisting state across plugin reloads
 const STORAGE_KEY_POSITIONS = 'markerMadness.positions'
 const STORAGE_KEY_PREFIX = 'markerMadness.notePrefix'
+const STORAGE_KEY_PAGE = 'markerMadness.currentPage'
 
 // Read a persisted value from localStorage, tolerating the sandboxed webview
 // where storage may be unavailable or empty.
@@ -289,20 +314,22 @@ const markerKeyArmed = ref(false)
 const restoredPrefix = loadStored(STORAGE_KEY_PREFIX, '')
 const notePrefix = ref(typeof restoredPrefix === 'string' ? restoredPrefix : '')
 
-// Persist markers and prefix to localStorage whenever they change so they
-// survive plugin reloads. Deep-watch positions since labels/order mutate.
+// Which page is showing: 'markers' (capture/send) or 'cleanup' (review/delete).
+const restoredPage = loadStored(STORAGE_KEY_PAGE, 'markers')
+const currentPage = ref(restoredPage === 'cleanup' ? 'cleanup' : 'markers')
+
+// Persist markers, prefix and current page to localStorage whenever they change
+// so they survive plugin reloads. Deep-watch positions since labels/order mutate.
 watch(storedPositions, value => saveStored(STORAGE_KEY_POSITIONS, value), { deep: true })
 watch(notePrefix, value => saveStored(STORAGE_KEY_PREFIX, value))
+watch(currentPage, value => saveStored(STORAGE_KEY_PAGE, value))
 
 // State for drag and drop reordering
 const draggedIndex = ref(null)
 
-// Build a normalized http(s) base URL for the director REST API
-const apiBase = () => {
-  return directorEndpoint.startsWith('http://') || directorEndpoint.startsWith('https://')
-    ? directorEndpoint
-    : `http://${directorEndpoint}`
-}
+// Build a normalized http(s) base URL for the director REST API. Thin wrapper
+// over the shared helper so existing call sites stay as apiBase().
+const apiBase = () => buildApiBase(directorEndpoint)
 
 // Fetch the list of transports available in the session (read-only GET) and
 // populate the dropdown. Multitransports (multi-transport managers) are
@@ -506,26 +533,9 @@ const goToPosition = async (marker) => {
   }
 }
 
-// POST a block of Python to the director and verify it ran. The execute API
-// returns { status, d3Log, pythonLog, returnValue }; a non-zero status.code
-// means the script raised. NOTE: scripts run as Python 2.7 on the server.
-const executePython = async (script) => {
-  const response = await fetch(`${apiBase()}/api/session/python/execute`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ script })
-  })
-
-  if (!response.ok) {
-    throw new Error(`HTTP error! status: ${response.status}`)
-  }
-
-  const result = await response.json()
-  if (result.status && result.status.code !== 0) {
-    throw new Error(`Python execute failed: ${result.status.message || JSON.stringify(result.status)}`)
-  }
-  return result
-}
+// POST a block of Python to the director and verify it ran. Thin wrapper over
+// the shared helper so existing call sites stay as executePython(script).
+const executePython = (script) => runPython(directorEndpoint, script)
 
 // d3 cue numbers follow the schema X, X.Y or X.Y.Z (digits in dot-separated
 // groups), e.g. "1" or "1.1". Used to validate before writing a CUE tag.
@@ -850,6 +860,45 @@ body {
   margin-top: 0.3rem;
   margin-bottom: 0.3rem;
   text-align: center;
+}
+
+.page-nav {
+  display: flex;
+  gap: 0.25rem;
+  align-items: flex-end;
+  margin: 0.5rem 0.5rem 0;
+  padding: 0 0.5rem;
+  border-bottom: 1px solid #424242;
+}
+
+.page-nav-btn {
+  position: relative;
+  top: 1px;
+  padding: 0.5rem 1.4rem;
+  border: 1px solid #424242;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background-color: #161616;
+  color: #9e9e9e;
+  font-family: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.page-nav-btn:hover {
+  background-color: #232323;
+  color: #e0e0e0;
+}
+
+/* Active tab merges into the page body: same dark surface as the sections
+   below, with its bottom edge sitting on top of the nav's border line. */
+.page-nav-btn.active {
+  background-color: #1e1e1e;
+  color: #ffffff;
+  border-color: #424242;
+  border-top: 2px solid #1976d2;
+  padding-top: calc(0.5rem - 1px);
 }
 
 .stored-positions-section {
