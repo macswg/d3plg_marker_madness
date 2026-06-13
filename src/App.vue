@@ -983,7 +983,7 @@ select.transport-input {
   border: 1px solid #616161;
   border-radius: 4px;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
   transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
