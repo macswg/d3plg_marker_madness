@@ -74,18 +74,18 @@
               <path d="M5 21h14" />
             </svg>
           </button>
-          <button @click="triggerImport" class="import-btn" title="Import YAML" aria-label="Import YAML">
+          <button @click="openImport" class="import-btn" title="Import YAML (paste)" aria-label="Import YAML">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M12 21V9" />
               <path d="M7 14l5-5 5 5" />
               <path d="M5 3h14" />
             </svg>
           </button>
-          <input 
+          <input
             ref="fileInput"
-            type="file" 
-            accept=".yaml,.yml" 
-            @change="importPositions" 
+            type="file"
+            accept=".yaml,.yml"
+            @change="loadFileIntoImport"
             style="display: none"
           />
         </div>
@@ -145,6 +145,31 @@
         <div class="export-panel-buttons">
           <button @click="copyExportText" class="send-d3-btn">Copy</button>
           <button @click="closeExportOverlay" class="remove-btn">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Paste-in import: the sandbox blocks the file dialog and confirm(), so
+         the user pastes YAML and picks Replace or Append here. -->
+    <div v-if="showImportOverlay" class="export-overlay" @click.self="closeImport">
+      <div class="export-panel">
+        <div class="export-panel-header">
+          <span>Paste YAML to import</span>
+          <span class="export-panel-hint">Paste exported YAML below, then choose Replace or Append</span>
+        </div>
+        <textarea
+          ref="importTextarea"
+          class="export-panel-text"
+          placeholder="positions:&#10;  - position: 12.34&#10;    ..."
+          v-model="importText"
+        ></textarea>
+        <div v-if="importError" class="import-error">{{ importError }}</div>
+        <div class="export-panel-buttons">
+          <button @click="fileInput?.click()" class="import-btn-text" title="Load from a .yaml file">Load file…</button>
+          <span class="import-buttons-spacer"></span>
+          <button @click="applyImport('replace')" class="send-d3-btn">Replace</button>
+          <button @click="applyImport('append')" class="send-d3-btn">Append</button>
+          <button @click="closeImport" class="remove-btn">Cancel</button>
         </div>
       </div>
     </div>
@@ -228,6 +253,13 @@ const flashStatus = (message) => {
 // user can select-all and copy it manually. Non-empty => overlay visible.
 const exportText = ref('')
 const exportTextarea = ref(null)
+
+// Paste-in import overlay state. The file <input> and confirm()/alert() are
+// blocked in the sandbox, so import is driven by pasted YAML + in-DOM buttons.
+const showImportOverlay = ref(false)
+const importText = ref('')
+const importError = ref('')
+const importTextarea = ref(null)
 
 // State for number key shortcuts (1-9 to jump to markers)
 const numberKeysArmed = ref(false)
@@ -634,70 +666,83 @@ const closeExportOverlay = () => {
   exportText.value = ''
 }
 
-// Function to trigger file input for import
-const triggerImport = () => {
-  fileInput.value?.click()
+// Normalize a raw imported position into our internal marker shape.
+const normalizeImported = pos => ({
+  position: pos.position,
+  transport: pos.transport || 'default',
+  track: pos.track || '',
+  trackUid: pos.trackUid || '',
+  timecode: pos.timecode || '',
+  beat: typeof pos.beat === 'number' ? pos.beat : null,
+  label: pos.label || ''
+})
+
+// Open the paste-in import overlay. This mirrors the export overlay and is the
+// sandbox-robust path: the file <input> and native dialogs (confirm/alert) are
+// blocked inside d3's webview, so the user pastes YAML and chooses Replace or
+// Append with in-DOM buttons.
+const openImport = () => {
+  importText.value = ''
+  importError.value = ''
+  showImportOverlay.value = true
+  nextTick(() => importTextarea.value?.focus())
 }
 
-// Function to import stored positions from YAML
-const importPositions = async (event) => {
-  try {
-    const file = event.target.files[0]
-    if (!file) {
-      return
-    }
-    
-    const text = await file.text()
-    const data = load(text)
-    
-    // Validate the imported data structure
-    if (!data || !Array.isArray(data.positions)) {
-      throw new Error('Invalid YAML format. Expected an object with a "positions" array.')
-    }
-    
-    // Validate each position has required fields
-    const validPositions = data.positions.filter(pos => {
-      return typeof pos.position === 'number' && pos.position >= 0
-    })
-    
-    if (validPositions.length === 0) {
-      throw new Error('No valid positions found in the YAML file.')
-    }
-    
-    // Ask user if they want to replace or append
-    const shouldReplace = confirm(
-      `Found ${validPositions.length} position(s). Do you want to replace existing positions?\n\n` +
-      'Click OK to replace, Cancel to append to existing positions.'
-    )
-    
-    const normalize = pos => ({
-      position: pos.position,
-      transport: pos.transport || 'default',
-      track: pos.track || '',
-      trackUid: pos.trackUid || '',
-      timecode: pos.timecode || '',
-      beat: typeof pos.beat === 'number' ? pos.beat : null,
-      label: pos.label || ''
-    })
+const closeImport = () => {
+  showImportOverlay.value = false
+}
 
-    if (shouldReplace) {
-      storedPositions.value = validPositions.map(normalize)
-    } else {
-      storedPositions.value.push(...validPositions.map(normalize))
-    }
-    
-    // Reset file input so the same file can be imported again
-    event.target.value = ''
-    
-    console.log(`Imported ${validPositions.length} position(s) successfully`)
+// Parse the pasted YAML into validated, normalized positions, or throw.
+const parseImportText = () => {
+  const data = load(importText.value)
+  if (!data || !Array.isArray(data.positions)) {
+    throw new Error('Invalid YAML. Expected an object with a "positions" array.')
+  }
+  const valid = data.positions.filter(
+    pos => typeof pos.position === 'number' && pos.position >= 0
+  )
+  if (valid.length === 0) {
+    throw new Error('No valid positions found.')
+  }
+  return valid.map(normalizeImported)
+}
+
+// Apply the pasted YAML, either replacing or appending to existing markers.
+const applyImport = (mode) => {
+  let positions
+  try {
+    positions = parseImportText()
   } catch (error) {
     console.error('Error importing positions:', error)
-    alert(`Failed to import positions: ${error.message}`)
-    // Reset file input on error
-    if (event.target) {
-      event.target.value = ''
-    }
+    importError.value = error.message
+    return
   }
+
+  if (mode === 'replace') {
+    storedPositions.value = positions
+  } else {
+    storedPositions.value.push(...positions)
+  }
+  showImportOverlay.value = false
+  flashStatus(`Imported ${positions.length} position(s) (${mode}).`)
+}
+
+// Convenience for the desktop browser: read a chosen file into the paste box.
+// File selection may not work inside the sandbox, hence it's optional.
+const loadFileIntoImport = async (event) => {
+  const file = event.target.files[0]
+  if (!file) {
+    return
+  }
+  try {
+    importText.value = await file.text()
+    importError.value = ''
+  } catch (error) {
+    console.error('Could not read file:', error)
+    importError.value = `Could not read file: ${error.message}`
+  }
+  // Reset so the same file can be chosen again.
+  event.target.value = ''
 }
 
 // Keyboard event handler for number key shortcuts (1-9)
@@ -1037,8 +1082,34 @@ select.transport-input {
 
 .export-panel-buttons {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 0.5rem;
+}
+
+.import-buttons-spacer {
+  flex: 1;
+}
+
+.import-btn-text {
+  padding: 0.5rem 0.8rem;
+  background-color: #424242;
+  color: #e0e0e0;
+  border: 1px solid #616161;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+.import-btn-text:hover {
+  background-color: #4a4a4a;
+  border-color: #757575;
+}
+
+.import-error {
+  color: #ef9a9a;
+  font-size: 0.85rem;
 }
 
 .export-btn:hover {
