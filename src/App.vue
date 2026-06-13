@@ -57,7 +57,7 @@
           >
             {{ numberKeysArmed ? 'Num Keys ON' : 'Num Keys OFF' }}
           </button>
-          <button @click="sendNotesToD3" class="send-d3-btn" title="Send markers to d3 as timeline notes">
+          <button @click="sendNotesToD3" class="send-d3-btn" title="Send markers to d3 as timeline notes and cues">
             Send to d3
           </button>
           <button @click="exportPositions" class="export-btn" title="Copy positions as YAML" aria-label="Copy YAML">
@@ -118,12 +118,23 @@
               <span class="position-seconds">{{ item.timecode || item.position.toFixed(2) + 's' }}</span>
               <span class="position-transport">{{ item.track || '(no track)' }}</span>
             </div>
-            <input 
-              type="text" 
-              v-model="item.label" 
-              placeholder="Enter label..."
-              class="position-label-input"
-            />
+            <div class="position-inputs">
+              <input
+                type="text"
+                v-model="item.label"
+                placeholder="Enter label..."
+                class="position-label-input"
+              />
+              <input
+                type="text"
+                :value="item.cueNumber"
+                @input="item.cueNumber = sanitizeCueNumber($event.target.value)"
+                inputmode="decimal"
+                placeholder="Cue #"
+                title="Cue number, digits and dots only (e.g. 1 or 1.1)"
+                class="cue-number-input"
+              />
+            </div>
           </div>
           <div class="button-group">
             <button @click="goToPosition(item)" class="go-to-btn">Go To</button>
@@ -362,7 +373,10 @@ const capturePosition = async (position, transport, timecode, beat) => {
     // The d3 timeline beat at capture time. Stored so the marker can be written
     // back to d3 as a note via track.setNoteAtBeat() with no time->beat math.
     beat: typeof beat === 'number' ? beat : null,
-    label: ''
+    label: '',
+    // Optional cue number (e.g. "1" or "1.1"). When set and valid, the marker
+    // is written to d3 as a CUE tag in addition to (or instead of) its note.
+    cueNumber: ''
   })
 }
 
@@ -513,40 +527,67 @@ const executePython = async (script) => {
   return result
 }
 
-// Send the stored markers to d3 as timeline notes. Each marker carries the
-// beat it was captured at, so we write it directly with track.setNoteAtBeat()
-// — no time->beat conversion needed. Markers are grouped by track so each note
-// lands on the track it was captured on, loaded by uid (preferred) or name.
+// d3 cue numbers follow the schema X, X.Y or X.Y.Z (digits in dot-separated
+// groups), e.g. "1" or "1.1". Used to validate before writing a CUE tag.
+const CUE_NUMBER_RE = /^\d+(\.\d+)*$/
+
+// Restrict cue-number input to digits and dots as the user types. Full
+// validation against CUE_NUMBER_RE happens at send time.
+const sanitizeCueNumber = (value) => (value || '').replace(/[^\d.]/g, '')
+
+// Send the stored markers to d3 as timeline notes and/or cues. Each marker
+// carries the beat it was captured at, so we write it directly — no time->beat
+// conversion needed. A non-empty label is written as a note via
+// setNoteAtBeat(); a valid cue number is written as a CUE tag via
+// setTagAtBeat(Tag(Tag.CUE, ...)). A marker with both gets both on one cue.
+// Markers are grouped by track so each lands on the track it was captured on,
+// loaded by uid (preferred) or name.
 const sendNotesToD3 = async () => {
-  // Only markers that have both a beat and a label are meaningful as notes.
-  const writable = storedPositions.value.filter(
-    m => typeof m.beat === 'number' && (m.label || '').trim() !== ''
-  )
+  // A marker is writable if it has a beat and at least one of: a label (note)
+  // or a valid cue number (CUE tag).
+  const writable = storedPositions.value.filter(m => {
+    if (typeof m.beat !== 'number') {
+      return false
+    }
+    const hasLabel = (m.label || '').trim() !== ''
+    const hasCue = CUE_NUMBER_RE.test((m.cueNumber || '').trim())
+    return hasLabel || hasCue
+  })
 
   if (writable.length === 0) {
-    console.warn('No markers with a beat and a label to send.')
+    console.warn('No markers with a beat and a label or cue number to send.')
     return
   }
 
   // Prefix to distinguish plugin-added notes from manual ones. When set, each
-  // note becomes "<prefix>_<label>".
+  // note becomes "<prefix>_<label>". Cue numbers are numeric and never prefixed.
   const prefix = notePrefix.value.trim()
 
-  // Group markers by the track they belong to.
+  // Group markers by the track they belong to. Each item carries an optional
+  // note and an optional cue number.
   const byTrack = new Map()
   for (const m of writable) {
     const key = m.trackUid || m.track || ''
     if (!byTrack.has(key)) {
-      byTrack.set(key, { uid: m.trackUid || '', notes: [] })
+      byTrack.set(key, { uid: m.trackUid || '', items: [] })
     }
-    const note = prefix ? `${prefix}_${m.label}` : m.label
-    byTrack.get(key).notes.push({ beat: m.beat, note })
+    const label = (m.label || '').trim()
+    const cue = (m.cueNumber || '').trim()
+    const item = { beat: m.beat }
+    if (label) {
+      item.note = prefix ? `${prefix}_${m.label}` : m.label
+    }
+    if (CUE_NUMBER_RE.test(cue)) {
+      item.cue = cue
+    }
+    byTrack.get(key).items.push(item)
   }
 
-  // Build a Python 2.7 script that resolves each track and sets its notes.
-  // Values are JSON-encoded so strings are safely escaped inside the Python
-  // source. A track is resolved by its UID (UidManager) when we have one,
-  // otherwise we fall back to the director's currently-loaded track.
+  // Build a Python 2.7 script that resolves each track and writes its notes and
+  // cues. Values are JSON-encoded so strings are safely escaped inside the
+  // Python source. A track is resolved by its UID (UidManager) when we have one,
+  // otherwise we fall back to the director's currently-loaded track. Tag and
+  // Tag.CUE are d3 globals in the execute environment.
   const groups = Array.from(byTrack.values())
   const script = [
     'import json',
@@ -564,17 +605,21 @@ const sendNotesToD3 = async () => {
     '        track = state.localOrDirectorState().track',
     '    if track is None:',
     '        continue',
-    "    for n in g['notes']:",
-    "        track.setNoteAtBeat(float(n['beat']), n['note'])",
-    '        written += 1',
+    "    for n in g['items']:",
+    "        if n.get('cue'):",
+    "            track.setTagAtBeat(float(n['beat']), Tag(Tag.CUE, n['cue']))",
+    "            written += 1",
+    "        if n.get('note'):",
+    "            track.setNoteAtBeat(float(n['beat']), n['note'])",
+    '            written += 1',
     'return written'
   ].join('\n')
 
   try {
     const result = await executePython(script)
-    console.log(`Sent ${writable.length} note(s) to d3. returnValue:`, result.returnValue)
+    console.log(`Sent ${writable.length} marker(s) to d3 as notes/cues. returnValue:`, result.returnValue)
   } catch (error) {
-    console.error('Error sending notes to d3:', error)
+    console.error('Error sending notes/cues to d3:', error)
   }
 }
 
@@ -591,7 +636,9 @@ const buildExportYaml = () => {
       // The d3 timeline beat at capture time (used for setNoteAtBeat)
       beat: typeof item.beat === 'number' ? item.beat : null,
       // The per-marker note shown in the UI label input
-      label: item.label || ''
+      label: item.label || '',
+      // Optional per-marker cue number (CUE tag), e.g. "1" or "1.1"
+      cueNumber: item.cueNumber || ''
     }))
   }
   return dump(data, { indent: 2 })
@@ -679,7 +726,8 @@ const normalizeImported = pos => ({
   trackUid: pos.trackUid || '',
   timecode: pos.timecode || '',
   beat: typeof pos.beat === 'number' ? pos.beat : null,
-  label: pos.label || ''
+  label: pos.label || '',
+  cueNumber: typeof pos.cueNumber === 'string' ? pos.cueNumber : ''
 })
 
 // Open the paste-in import overlay. This mirrors the export overlay and is the
@@ -1238,6 +1286,42 @@ select.transport-input {
 }
 
 .position-label-input::placeholder {
+  color: #757575;
+  font-style: italic;
+}
+
+.position-inputs {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  max-width: 300px;
+}
+
+.position-inputs .position-label-input {
+  flex: 1 1 auto;
+  max-width: none;
+}
+
+.cue-number-input {
+  flex: 0 0 auto;
+  width: 4.5rem;
+  padding: 0.5rem;
+  border: 2px solid #424242;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #e0e0e0;
+  background-color: #1e1e1e;
+  transition: border-color 0.2s ease;
+  font-family: inherit;
+  text-align: center;
+}
+
+.cue-number-input:focus {
+  outline: none;
+  border-color: #64b5f6;
+}
+
+.cue-number-input::placeholder {
   color: #757575;
   font-style: italic;
 }
