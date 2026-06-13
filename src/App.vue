@@ -225,7 +225,7 @@ const fetchCurrentTrack = async (transport) => {
 }
 
 // Function to capture the current playhead position (and the loaded track)
-const capturePosition = async (position, transport, timecode) => {
+const capturePosition = async (position, transport, timecode, beat) => {
   if (position === undefined || position === null) {
     return
   }
@@ -238,6 +238,9 @@ const capturePosition = async (position, transport, timecode) => {
     track: track.name,
     trackUid: track.uid,
     timecode: timecode || '',
+    // The d3 timeline beat at capture time. Stored so the marker can be written
+    // back to d3 as a note via track.setNoteAtBeat() with no time->beat math.
+    beat: typeof beat === 'number' ? beat : null,
     label: ''
   })
 }
@@ -385,6 +388,8 @@ const exportPositions = () => {
         trackUid: item.trackUid || '',
         // The d3-computed timecode string shown for the marker
         timecode: item.timecode || '',
+        // The d3 timeline beat at capture time (used for setNoteAtBeat)
+        beat: typeof item.beat === 'number' ? item.beat : null,
         // The per-marker note shown in the UI label input
         label: item.label || ''
       }))
@@ -449,6 +454,7 @@ const importPositions = async (event) => {
       track: pos.track || '',
       trackUid: pos.trackUid || '',
       timecode: pos.timecode || '',
+      beat: typeof pos.beat === 'number' ? pos.beat : null,
       label: pos.label || ''
     })
 

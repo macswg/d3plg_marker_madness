@@ -41,20 +41,24 @@
   // for capturing markers and seeking.
   const { player_tRender } = props.liveUpdate.autoSubscribe(transportManagerKey, ['object.player.tRender'])
 
-  // Subscribe to the d3-computed timecode for display. d3 evaluates this on the
-  // server, baking in the timeline's TC tags, offset starts, tag regions, and
-  // frame rate, so it matches d3's own transport readout exactly. autoSubscribe
-  // can't name a compound expression, so we use subscribe() with an explicit name.
-  const { timecode } = props.liveUpdate.subscribe(transportManagerKey, {
+  // Subscribe to the d3-computed timecode for display, plus the underlying
+  // timeline beat. d3 evaluates these on the server, baking in the timeline's
+  // TC tags, offset starts, tag regions, and frame rate, so they match d3's own
+  // transport readout exactly. The beat is captured alongside the marker so it
+  // can be written back as a note via track.setNoteAtBeat() without any
+  // client-side time->beat conversion. autoSubscribe can't name a compound
+  // expression, so we use subscribe() with explicit names.
+  const { timecode, beat } = props.liveUpdate.subscribe(transportManagerKey, {
     timecode:
-      'object.beatToTimecode(object.player.track.timeToBeat(object.player.tRender)).__str__()'
+      'object.beatToTimecode(object.player.track.timeToBeat(object.player.tRender)).__str__()',
+    beat: 'object.player.track.timeToBeat(object.player.tRender)'
   })
 
   // Handle capture button click
   const handleCapture = () => {
     console.log('Capture button clicked, player_tRender:', player_tRender.value)
     if (player_tRender.value !== undefined) {
-      emit('capture-position', player_tRender.value, transportNameValue, timecode.value)
+      emit('capture-position', player_tRender.value, transportNameValue, timecode.value, beat.value)
       console.log('Emitted capture-position event with value:', player_tRender.value)
     } else {
       console.warn('player_tRender is undefined, cannot capture position')
