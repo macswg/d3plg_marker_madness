@@ -75,6 +75,28 @@
           >
             {{ numberKeysArmed ? 'Num Keys ON' : 'Num Keys OFF' }}
           </button>
+          <button
+            @click="toggleExisting"
+            :class="['number-keys-btn', { armed: showExisting }]"
+            :title="showExisting
+              ? 'Hide the cues, notes and section breaks already on the active track'
+              : 'Interleave the cues, notes and section breaks already on the active track, sorted by time'"
+          >
+            {{ showExisting ? 'Hide Existing' : 'Show Existing' }}
+          </button>
+          <button
+            v-if="showExisting"
+            @click="loadExisting"
+            :disabled="existingLoading"
+            class="refresh-btn"
+            title="Re-read the active track from d3"
+            aria-label="Refresh existing items"
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+              <path d="M21 3v5h-5" />
+            </svg>
+          </button>
           <button @click="sendNotesToD3" class="send-d3-btn" title="Send markers to d3 as timeline notes and cues">
             Send to d3
           </button>
@@ -114,51 +136,81 @@
         <span class="note-prefix-hint">Prepended (with an underscore) to every note sent to d3, e.g. @_ → @_cue1</span>
       </div>
       <div v-if="copyStatus" class="copy-status">{{ copyStatus }}</div>
-      <div v-if="storedPositions.length === 0" class="empty-message">
+      <div v-if="showExisting && existingTrack.name" class="existing-track">
+        Interleaving what's already on <strong>{{ existingTrack.name }}</strong>, sorted by time
+      </div>
+      <div v-if="showExisting && existingError" class="existing-error">{{ existingError }}</div>
+      <div v-if="showExisting && existingLoading" class="empty-message">Reading track…</div>
+      <div v-if="mergedMarkers.length === 0" class="empty-message">
         No positions captured yet. Click "Capture Position" to add one.
       </div>
       <ul v-else class="positions-list">
-        <li 
-          v-for="(item, index) in storedPositions" 
-          :key="index" 
-          class="position-item"
-          draggable="true"
-          @dragstart="handleDragStart($event, index)"
-          @dragover="handleDragOver"
-          @dragenter="handleDragEnter"
-          @dragleave="handleDragLeave"
-          @drop="handleDrop($event, index)"
-          @dragend="handleDragEnd"
-        >
-          <div class="position-value">
-            <div class="position-header">
-              <span class="position-index">{{ index + 1 }}</span>
-              <span class="position-seconds">{{ item.timecode || item.position.toFixed(2) + 's' }}</span>
-              <span class="position-transport">{{ item.track || '(no track)' }}</span>
+        <template v-for="row in mergedMarkers" :key="row.key">
+          <!-- Captured markers: editable, removable, and reorderable by drag
+               while the list is in manual order. -->
+          <li
+            v-if="row.kind === 'new'"
+            class="position-item"
+            :draggable="!showExisting"
+            @dragstart="handleDragStart($event, row.index)"
+            @dragover="handleDragOver"
+            @dragenter="handleDragEnter"
+            @dragleave="handleDragLeave"
+            @drop="handleDrop($event, row.index)"
+            @dragend="handleDragEnd"
+          >
+            <div class="position-value">
+              <div class="position-header">
+                <span class="position-index">{{ row.index + 1 }}</span>
+                <span class="position-seconds">{{ row.item.timecode || row.item.position.toFixed(2) + 's' }}</span>
+                <span class="position-transport">{{ row.item.track || '(no track)' }}</span>
+              </div>
+              <div class="position-inputs">
+                <input
+                  type="text"
+                  v-model="row.item.label"
+                  placeholder="Enter label..."
+                  class="position-label-input"
+                />
+                <input
+                  type="text"
+                  :value="row.item.cueNumber"
+                  @input="row.item.cueNumber = sanitizeCueNumber($event.target.value)"
+                  inputmode="decimal"
+                  placeholder="Cue #"
+                  title="Cue number, digits and dots only (e.g. 1 or 1.1)"
+                  class="cue-number-input"
+                />
+              </div>
             </div>
-            <div class="position-inputs">
-              <input
-                type="text"
-                v-model="item.label"
-                placeholder="Enter label..."
-                class="position-label-input"
-              />
-              <input
-                type="text"
-                :value="item.cueNumber"
-                @input="item.cueNumber = sanitizeCueNumber($event.target.value)"
-                inputmode="decimal"
-                placeholder="Cue #"
-                title="Cue number, digits and dots only (e.g. 1 or 1.1)"
-                class="cue-number-input"
-              />
+            <div class="button-group">
+              <button @click="goToPosition(row.item)" class="go-to-btn">Go To</button>
+              <button @click="removePosition(row.index)" class="remove-btn">Remove</button>
             </div>
-          </div>
-          <div class="button-group">
-            <button @click="goToPosition(item)" class="go-to-btn">Go To</button>
-            <button @click="removePosition(index)" class="remove-btn">Remove</button>
-          </div>
-        </li>
+          </li>
+
+          <!-- Already on the track in d3: read-only reference. Go To only —
+               these aren't ours to delete from the capture list. -->
+          <li v-else class="position-item existing-row">
+            <div class="position-value">
+              <div class="position-header">
+                <span class="position-index existing-index">d3</span>
+                <span class="position-seconds">{{ row.item.tc || formatSecs(row.item.secs) }}</span>
+                <span class="position-transport">{{ existingTrack.name || '(active track)' }}</span>
+              </div>
+              <div class="existing-body">
+                <span v-if="row.item.section != null" class="existing-badge badge-section">
+                  SECTION {{ row.item.section + 1 }}
+                </span>
+                <span v-if="row.item.cue" class="existing-badge badge-cue">CUE {{ row.item.cue }}</span>
+                <span v-if="row.item.note" class="existing-note">{{ row.item.note }}</span>
+              </div>
+            </div>
+            <div class="button-group">
+              <button @click="goToExisting(row.item)" class="go-to-btn">Go To</button>
+            </div>
+          </li>
+        </template>
       </ul>
     </div>
     
@@ -224,7 +276,7 @@
 </template>
 
 <script setup>
-import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useLiveUpdate, LiveUpdateOverlay } from '@disguise-one/vue-liveupdate'
 import PlayheadDisplay from './components/PlayheadDisplay.vue'
 import TimelineCleanup from './components/TimelineCleanup.vue'
@@ -251,6 +303,7 @@ const availableTransports = ref([])
 const STORAGE_KEY_POSITIONS = 'markerMadness.positions'
 const STORAGE_KEY_PREFIX = 'markerMadness.notePrefix'
 const STORAGE_KEY_PAGE = 'markerMadness.currentPage'
+const STORAGE_KEY_SHOW_EXISTING = 'markerMadness.showExisting'
 
 // Read a persisted value from localStorage, tolerating the sandboxed webview
 // where storage may be unavailable or empty.
@@ -318,6 +371,17 @@ const notePrefix = ref(typeof restoredPrefix === 'string' ? restoredPrefix : '')
 const restoredPage = loadStored(STORAGE_KEY_PAGE, 'markers')
 const currentPage = ref(restoredPage === 'cleanup' ? 'cleanup' : 'markers')
 
+// Read-only view of what is already on the active track in d3 (cues, notes and
+// section breaks), so markers can be captured without blindly duplicating what
+// is already there. Hidden by default to keep the capture view compact.
+const showExisting = ref(loadStored(STORAGE_KEY_SHOW_EXISTING, false) === true)
+const existingTrack = ref({ name: '', uid: '' })
+const existingItems = ref([])
+const existingLoading = ref(false)
+const existingError = ref('')
+
+watch(showExisting, value => saveStored(STORAGE_KEY_SHOW_EXISTING, value))
+
 // Persist markers, prefix and current page to localStorage whenever they change
 // so they survive plugin reloads. Deep-watch positions since labels/order mutate.
 watch(storedPositions, value => saveStored(STORAGE_KEY_POSITIONS, value), { deep: true })
@@ -382,6 +446,189 @@ const fetchCurrentTrack = async (transport) => {
   }
   return { name: '', uid: '' }
 }
+
+// Format track seconds as m:ss.s for the rare item with no timecode.
+const formatSecs = (secs) => {
+  if (secs === null || secs === undefined) {
+    return ''
+  }
+  const s = Number(secs)
+  const m = Math.floor(s / 60)
+  return `${m}:${(s - m * 60).toFixed(1).padStart(4, '0')}`
+}
+
+// Pull every cue, note and section break on the active track. Read-only: this
+// never writes, it just mirrors what d3 already has so the capture list can be
+// compared against it. Mirrors the Timeline Cleanup pull, scoped to one track.
+const loadExisting = async () => {
+  existingLoading.value = true
+  existingError.value = ''
+  try {
+    const track = await fetchCurrentTrack(transportName.value)
+    existingTrack.value = track
+    if (!track.uid) {
+      existingItems.value = []
+      existingError.value = 'Could not determine the active track for this transport.'
+      return
+    }
+
+    // Notes on the d3 execute environment mirror the cleanup page: d3 serialises
+    // the return value itself, a track's display name is `description`, and
+    // attribute access can raise a C++ PythonException that doesn't derive from
+    // Exception — hence the bare `except:` guards.
+    const script = [
+      'try:',
+      `    t = UidManager.get().getResource(int("${track.uid}"))`,
+      '    if t is None:',
+      '        return {"ok": False, "error": "track not found"}',
+      '    tm = None',
+      '    try:',
+      '        tm = guisystem.currentTransportManager',
+      '    except:',
+      '        tm = None',
+      // Section breaks come from the track's section boundaries, not the cue
+      // list, so they are merged in by beat. Section 0 is the track start.
+      '    secBeats = {}',
+      '    try:',
+      '        nSec = t.nSections()',
+      '    except:',
+      '        nSec = 0',
+      '    for i in range(1, nSec):',
+      '        try:',
+      '            secBeats[round(t.sectionToBeat(i), 6)] = i',
+      '        except:',
+      '            pass',
+      '    beats = []',
+      '    seen = {}',
+      '    for b in t.cueBeats():',
+      '        k = round(b, 6)',
+      '        if k not in seen:',
+      '            seen[k] = True',
+      '            beats.append(b)',
+      '    for k in secBeats:',
+      '        if k not in seen:',
+      '            seen[k] = True',
+      '            beats.append(k)',
+      '    beats.sort()',
+      '    out = []',
+      '    for beat in beats:',
+      '        note = t.noteAtBeat(beat)',
+      '        cue = ""',
+      '        for tg in t.tagsAtBeat(beat):',
+      '            if tg.type == 1:',
+      '                cue = str(tg.text)',
+      '        section = secBeats.get(round(beat, 6))',
+      '        if note or cue or section is not None:',
+      '            try:',
+      '                secs = t.beatToTime(beat)',
+      '            except:',
+      '                secs = None',
+      '            tc = ""',
+      '            if tm is not None:',
+      '                try:',
+      '                    tc = str(tm.beatToTimecode(beat))',
+      '                except:',
+      '                    tc = ""',
+      '            out.append({"beat": beat, "secs": secs, "tc": tc, "note": note, "cue": cue, "section": section})',
+      '    return {"ok": True, "name": str(t.description), "items": out}',
+      'except Exception as e:',
+      '    return {"ok": False, "error": str(e)}'
+    ].join('\n')
+
+    const result = await executePython(script)
+    let data = result.returnValue
+    if (typeof data === 'string') {
+      data = data.trim() === '' ? {} : JSON.parse(data)
+    }
+    data = data || {}
+    if (data.ok === false) {
+      throw new Error(data.error || 'Unknown error in d3 script')
+    }
+    existingItems.value = Array.isArray(data.items) ? data.items : []
+    if (data.name) {
+      existingTrack.value = { ...existingTrack.value, name: data.name }
+    }
+  } catch (error) {
+    console.error('Could not load existing track contents:', error)
+    existingItems.value = []
+    existingError.value = `Could not read the track: ${error.message}`
+  } finally {
+    existingLoading.value = false
+  }
+}
+
+const toggleExisting = () => {
+  showExisting.value = !showExisting.value
+  if (showExisting.value) {
+    loadExisting()
+  }
+}
+
+// The capture list, optionally interleaved with what d3 already has on the
+// active track and sorted by time, so a new marker can be read against the
+// existing ones around it.
+//
+// New rows keep their storedPositions index rather than their position in this
+// merged list: the displayed number drives the 1-9 shortcuts, so it has to stay
+// tied to the capture list. While existing items are hidden the list is left in
+// manual (drag) order, which is what the reordering feature acts on.
+const mergedMarkers = computed(() => {
+  const rows = storedPositions.value.map((item, index) => ({
+    kind: 'new',
+    key: `new-${index}`,
+    sortSecs: typeof item.position === 'number' ? item.position : 0,
+    item,
+    index
+  }))
+
+  if (!showExisting.value) {
+    return rows
+  }
+
+  existingItems.value.forEach((item, i) => {
+    rows.push({
+      kind: 'existing',
+      key: `d3-${i}`,
+      sortSecs: typeof item.secs === 'number' ? item.secs : 0,
+      item,
+      index: null
+    })
+  })
+
+  // Sort by time; on a tie put the captured marker first, so a capture made at
+  // an existing marker's time reads as "mine, then what's already there".
+  rows.sort((a, b) => {
+    if (a.sortSecs !== b.sortSecs) {
+      return a.sortSecs - b.sortSecs
+    }
+    if (a.kind === b.kind) {
+      return 0
+    }
+    return a.kind === 'new' ? -1 : 1
+  })
+  return rows
+})
+
+// Existing items all live on the track the panel was loaded for, so build the
+// shape goToPosition expects from that track.
+const goToExisting = (item) => {
+  if (item.secs === null || item.secs === undefined) {
+    return
+  }
+  return goToPosition({
+    position: item.secs,
+    transport: transportName.value,
+    track: existingTrack.value.name,
+    trackUid: existingTrack.value.uid
+  })
+}
+
+// Keep the panel honest when the transport (and so the active track) changes.
+watch(transportName, () => {
+  if (showExisting.value) {
+    loadExisting()
+  }
+})
 
 // Function to capture the current playhead position (and the loaded track)
 const capturePosition = async (position, transport, timecode, beat) => {
@@ -1098,6 +1345,71 @@ select.transport-input {
   cursor: pointer;
   font-size: 0.78rem;
   transition: background-color 0.2s ease, border-color 0.2s ease;
+}
+
+/* "On This Track": read-only mirror of what d3 already has. Deliberately
+   quieter than the captured-positions list so it reads as reference. */
+.existing-track {
+  font-size: 0.85rem;
+  color: #90a4ae;
+  margin-bottom: 0.5rem;
+}
+
+.existing-error {
+  font-size: 0.85rem;
+  color: #ef9a9a;
+  margin-bottom: 0.5rem;
+}
+
+/* Existing d3 rows sit in the same list as captured markers, so they get the
+   same shape but a muted, non-editable treatment to tell them apart. */
+.existing-row {
+  background-color: #232323;
+  border-left: 3px solid #00695c;
+  cursor: default;
+}
+
+.existing-row:hover {
+  background-color: #262626;
+}
+
+.existing-index {
+  background-color: #00695c !important;
+  color: #e0f2f1 !important;
+  font-size: 0.65rem !important;
+}
+
+.existing-body {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.existing-badge {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 0.08rem 0.35rem;
+  border-radius: 3px;
+}
+
+.badge-section {
+  background-color: #00695c;
+  color: #e0f2f1;
+}
+
+.badge-cue {
+  background-color: #3a3a3a;
+  color: #f5f5f5;
+}
+
+.existing-note {
+  font-size: 0.85rem;
+  color: #e0e0e0;
+  word-break: break-word;
 }
 
 .note-prefix-input {

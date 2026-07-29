@@ -8,11 +8,15 @@
     </div>
 
     <p class="cleanup-intro">
-      Pull every note and cue from all tracks in the session. Rename a note or
-      cue number in place (✎) — edits are saved back at the same beat, so cue
-      timing never moves. Tick items and delete the ones you don't want. TC
-      (timecode) tags are shown for context but can't be edited or deleted, and
-      nothing is rewritten except the items you change.
+      Pull every note and cue from all tracks in the session. Click a note or
+      cue number to rename it in place, then use Tab / Shift+Tab to step to the
+      next or previous one — edits are saved back at the same beat, so cue
+      timing never moves. Tick items and delete the ones you don't want. Section
+      breaks are shown for context and can't be edited here. TC tags and marker
+      times are protected until you unlock them — <em>Unlock TC</em> allows
+      editing and deleting timecode tags, and <em>Unlock time</em> shows each
+      item's timecode — click it to move just that note or tag. Nothing is
+      rewritten except the items you change.
     </p>
 
     <!-- Search + selection controls (only meaningful once data is pulled) -->
@@ -24,6 +28,24 @@
         class="cleanup-search"
       />
       <span class="cleanup-spacer"></span>
+      <button
+        :class="['lock-btn', { unlocked: tcUnlocked }]"
+        :title="tcUnlocked
+          ? 'TC tags can now be edited and deleted — click to protect them again'
+          : 'Allow editing and deleting TC (timecode) tags'"
+        @click="toggleTcUnlock"
+      >
+        {{ tcUnlocked ? '🔓 TC unlocked' : '🔒 Unlock TC' }}
+      </button>
+      <button
+        :class="['lock-btn', { unlocked: timeUnlocked }]"
+        :title="timeUnlocked
+          ? 'Marker times can now be changed — click to protect them again'
+          : 'Allow moving markers to a different timecode'"
+        @click="toggleTimeUnlock"
+      >
+        {{ timeUnlocked ? '🔓 Time unlocked' : '🔒 Unlock time' }}
+      </button>
       <button class="link-btn" @click="selectAllVisible">Select all</button>
       <button class="link-btn" @click="clearSelection">Clear</button>
     </div>
@@ -59,12 +81,21 @@
           </div>
 
           <div class="cleanup-elements">
+            <!-- Section break marker: read-only context, shown above the tags
+                 because it's a property of the track, not of the cue. -->
+            <div v-if="cue.section != null" class="cleanup-element locked section-break">
+              <span class="cleanup-lock" title="Section breaks can't be deleted here">🔒</span>
+              <span class="cleanup-badge badge-section">SECTION</span>
+              <span class="cleanup-text">Section {{ cue.section + 1 }} starts here</span>
+            </div>
+
             <!-- Tags first (cue/TC/MIDI), so a cue sits above the note at the
                  same beat, matching how d3 stacks them on the timeline. -->
             <template v-for="tag in cue.tags" :key="tag.type">
-              <!-- TC tags are locked: shown for context, never deletable -->
-              <div v-if="tag.type === TC_TYPE" class="cleanup-element locked">
-                <span class="cleanup-lock" title="TC tags can't be deleted">🔒</span>
+              <!-- TC tags are shown for context and protected until unlocked,
+                   because changing one shifts every timecode after it. -->
+              <div v-if="tag.type === TC_TYPE && !tcUnlocked" class="cleanup-element locked">
+                <span class="cleanup-lock" title="TC tags are protected — use “Unlock TC” to edit or delete them">🔒</span>
                 <span class="cleanup-badge badge-tc">TC</span>
                 <span class="cleanup-text">{{ tag.text }}</span>
               </div>
@@ -79,11 +110,14 @@
                 <template v-if="tag.type === CUE_TYPE">
                   <template v-if="editingKey === tagKey(track.uid, cue.beat, CUE_TYPE)">
                     <input
+                      v-focus
                       class="cleanup-edit-input cue-edit"
                       :value="editValue"
                       @input="editValue = sanitizeCueNumber($event.target.value)"
                       @keyup.enter="!isSaveDisabled && saveRename(track, cue, tag)"
                       @keyup.esc="cancelEdit"
+                      @keydown.tab.exact.prevent="moveEdit(1)"
+                      @keydown.tab.shift.prevent="moveEdit(-1)"
                       inputmode="decimal"
                       placeholder="Cue #"
                     />
@@ -91,13 +125,64 @@
                     <button class="edit-action cancel" :disabled="saving" @click="cancelEdit">Cancel</button>
                   </template>
                   <template v-else>
-                    <span class="cue-chip">CUE {{ tag.text }}</span>
-                    <button class="edit-btn" title="Rename cue number" @click="startEdit(tagKey(track.uid, cue.beat, CUE_TYPE), tag.text)">✎</button>
+                    <span
+                      class="cue-chip editable"
+                      title="Click to renumber this cue"
+                      @click="startEdit(tagKey(track.uid, cue.beat, CUE_TYPE), tag.text)"
+                    >CUE {{ tag.text }}</span>
+                  </template>
+                </template>
+                <!-- Unlocked TC: editable like a note, but validated as a
+                     timecode so a typo can't corrupt the track's mapping. -->
+                <template v-else-if="tag.type === TC_TYPE">
+                  <span class="cleanup-badge badge-tc">TC</span>
+                  <template v-if="editingKey === tagKey(track.uid, cue.beat, TC_TYPE)">
+                    <input
+                      v-focus
+                      :class="['cleanup-edit-input', 'tc-edit', { invalid: editValue && isSaveDisabled }]"
+                      v-model="editValue"
+                      @keyup.enter="!isSaveDisabled && saveRename(track, cue, tag)"
+                      @keyup.esc="cancelEdit"
+                      @keydown.tab.exact.prevent="moveEdit(1)"
+                      @keydown.tab.shift.prevent="moveEdit(-1)"
+                      placeholder="h:mm:ss:ff"
+                    />
+                    <button class="edit-action" :disabled="isSaveDisabled || saving" @click="saveRename(track, cue, tag)">Save</button>
+                    <button class="edit-action cancel" :disabled="saving" @click="cancelEdit">Cancel</button>
+                  </template>
+                  <template v-else>
+                    <span
+                      class="cleanup-text editable"
+                      title="Click to edit this timecode tag"
+                      @click="startEdit(tagKey(track.uid, cue.beat, TC_TYPE), tag.text)"
+                    >{{ tag.text }}</span>
                   </template>
                 </template>
                 <template v-else>
                   <span class="cleanup-badge badge-midi">{{ tagTypeLabel(tag.type) }}</span>
                   <span class="cleanup-text">{{ tag.text }}</span>
+                </template>
+
+                <!-- Move this tag (and only this tag) to another timecode -->
+                <template v-if="timeUnlocked">
+                  <template v-if="movingKey === moveKey(track.uid, cue.beat, tag.type)">
+                    <input
+                      v-focus
+                      :class="['cleanup-edit-input', 'tc-edit', { invalid: moveValue && isMoveDisabled }]"
+                      v-model="moveValue"
+                      @keyup.enter="!isMoveDisabled && saveMove(track, cue, tag)"
+                      @keyup.esc="cancelMove"
+                      placeholder="h:mm:ss:ff"
+                    />
+                    <button class="edit-action" :disabled="isMoveDisabled || saving" @click="saveMove(track, cue, tag)">Move</button>
+                    <button class="edit-action cancel" :disabled="saving" @click="cancelMove">Cancel</button>
+                  </template>
+                  <span
+                    v-else
+                    class="move-time editable"
+                    title="Click to move this to a different timecode"
+                    @click="startMove(moveKey(track.uid, cue.beat, tag.type), cue.tc)"
+                  >{{ cue.tc || '—' }}</span>
                 </template>
               </div>
             </template>
@@ -112,18 +197,46 @@
               <span class="cleanup-badge badge-note">NOTE</span>
               <template v-if="editingKey === noteKey(track.uid, cue.beat)">
                 <input
+                  v-focus
                   class="cleanup-edit-input"
                   v-model="editValue"
                   @keyup.enter="!isSaveDisabled && saveRename(track, cue, null)"
                   @keyup.esc="cancelEdit"
+                  @keydown.tab.exact.prevent="moveEdit(1)"
+                  @keydown.tab.shift.prevent="moveEdit(-1)"
                   placeholder="Note text"
                 />
                 <button class="edit-action" :disabled="isSaveDisabled || saving" @click="saveRename(track, cue, null)">Save</button>
                 <button class="edit-action cancel" :disabled="saving" @click="cancelEdit">Cancel</button>
               </template>
               <template v-else>
-                <span class="cleanup-text">{{ cue.note }}</span>
-                <button class="edit-btn" title="Rename note" @click="startEdit(noteKey(track.uid, cue.beat), cue.note)">✎</button>
+                <span
+                  class="cleanup-text editable"
+                  title="Click to rename this note"
+                  @click="startEdit(noteKey(track.uid, cue.beat), cue.note)"
+                >{{ cue.note }}</span>
+              </template>
+
+              <!-- Move this note (and only this note) to another timecode -->
+              <template v-if="timeUnlocked">
+                <template v-if="movingKey === moveKey(track.uid, cue.beat, null)">
+                  <input
+                    v-focus
+                    :class="['cleanup-edit-input', 'tc-edit', { invalid: moveValue && isMoveDisabled }]"
+                    v-model="moveValue"
+                    @keyup.enter="!isMoveDisabled && saveMove(track, cue, null)"
+                    @keyup.esc="cancelMove"
+                    placeholder="h:mm:ss:ff"
+                  />
+                  <button class="edit-action" :disabled="isMoveDisabled || saving" @click="saveMove(track, cue, null)">Move</button>
+                  <button class="edit-action cancel" :disabled="saving" @click="cancelMove">Cancel</button>
+                </template>
+                <span
+                  v-else
+                  class="move-time editable"
+                  title="Click to move this to a different timecode"
+                  @click="startMove(moveKey(track.uid, cue.beat, null), cue.tc)"
+                >{{ cue.tc || '—' }}</span>
               </template>
             </div>
           </div>
@@ -197,15 +310,78 @@ const error = ref('')
 const confirming = ref(false)
 const searchQuery = ref('')
 
+// TC tags are protected by default: they define the timecode mapping for the
+// whole track, so editing or deleting one shifts every timecode after it. The
+// toggle makes that an explicit, deliberate act rather than a stray click.
+const tcUnlocked = ref(false)
+
+const toggleTcUnlock = () => {
+  tcUnlocked.value = !tcUnlocked.value
+  if (!tcUnlocked.value) {
+    // Re-locking must not leave a TC tag armed for deletion or mid-edit.
+    const next = new Set()
+    for (const k of selected.value) {
+      if (!k.endsWith(`tag:${TC_TYPE}`)) {
+        next.add(k)
+      }
+    }
+    selected.value = next
+    if (editingKey.value && editingKey.value.endsWith(`tag:${TC_TYPE}`)) {
+      cancelEdit()
+    }
+  }
+}
+
 // Inline rename state: the key of the single element being edited and its
 // working value. `saving` blocks the buttons while a write is in flight.
 const editingKey = ref(null)
 const editValue = ref('')
+
+// Clicking a note/cue swaps it for an input, so focus and select the text to
+// let the user type straight over it without a second click.
+const vFocus = {
+  mounted: (el) => {
+    el.focus()
+    el.select()
+  }
+}
 const saving = ref(false)
 
 // Cue numbers follow d3's schema X, X.Y, X.Y.Z (digits in dot-separated groups).
 const CUE_NUMBER_RE = /^\d+(\.\d+)*$/
 const sanitizeCueNumber = (value) => (value || '').replace(/[^\d.]/g, '')
+
+// TC tags read back from d3 as h:mm:ss:ff (e.g. "1:00:00:0"), and d3 also
+// renders them with a dot before the frames, so accept either separator.
+// Minutes and seconds take 1 OR 2 digits: typing "1:5:12:0" is the natural way
+// to edit a field, and requiring "05" left the value silently invalid.
+const TIMECODE_RE = /^(\d{1,3}):(\d{1,2}):(\d{1,2})[:.](\d{1,3})$/
+
+// Parse a timecode into its parts, or null if it isn't one. Ranges are checked
+// numerically rather than by digit pattern so "1:5:9:0" is accepted but
+// "1:75:00:00" is not. Frames are bounded server-side, where the fps is known.
+const parseTimecode = (value) => {
+  const m = TIMECODE_RE.exec((value || '').trim())
+  if (!m) {
+    return null
+  }
+  const parts = { h: Number(m[1]), m: Number(m[2]), s: Number(m[3]), f: Number(m[4]) }
+  if (parts.m > 59 || parts.s > 59) {
+    return null
+  }
+  return parts
+}
+
+// Canonical h:mm:ss:ff, so what we send and echo back is consistent regardless
+// of how it was typed.
+const formatTimecode = (value) => {
+  const p = parseTimecode(value)
+  if (!p) {
+    return null
+  }
+  const pad = (n, w) => String(n).padStart(w, '0')
+  return `${pad(p.h, 2)}:${pad(p.m, 2)}:${pad(p.s, 2)}:${pad(p.f, 2)}`
+}
 
 const tagTypeLabel = (type) => (type === CUE_TYPE ? 'CUE' : type === MIDI_TYPE ? 'MIDI' : 'TC')
 
@@ -248,7 +424,8 @@ const filteredTracks = computed(() => {
     const cues = t.cues.filter(c => {
       const noteMatch = (c.note || '').toLowerCase().includes(q)
       const tagMatch = c.tags.some(tag => (tag.text || '').toLowerCase().includes(q))
-      return noteMatch || tagMatch
+      const sectionMatch = c.section != null && `section ${c.section + 1}`.includes(q)
+      return noteMatch || tagMatch || sectionMatch
     })
     if (cues.length) {
       out.push({ ...t, cues })
@@ -266,7 +443,7 @@ const visibleSelectableKeys = computed(() => {
         keys.push(noteKey(t.uid, c.beat))
       }
       for (const tag of c.tags) {
-        if (tag.type !== TC_TYPE) {
+        if (tag.type !== TC_TYPE || tcUnlocked.value) {
           keys.push(tagKey(t.uid, c.beat, tag.type))
         }
       }
@@ -295,8 +472,14 @@ const clearSelection = () => {
 // valid cue number for a cue (key ends with the CUE tag suffix).
 const isSaveDisabled = computed(() => {
   const v = (editValue.value || '').trim()
-  if (editingKey.value && editingKey.value.endsWith(`tag:${CUE_TYPE}`)) {
+  if (!editingKey.value) {
+    return true
+  }
+  if (editingKey.value.endsWith(`tag:${CUE_TYPE}`)) {
     return !CUE_NUMBER_RE.test(v)
+  }
+  if (editingKey.value.endsWith(`tag:${TC_TYPE}`)) {
+    return parseTimecode(v) === null
   }
   return v === ''
 })
@@ -317,9 +500,17 @@ const saveRename = async (track, cue, tag) => {
   if (isSaveDisabled.value || saving.value) {
     return
   }
-  const kind = tag ? 'cue' : 'note'
+  const kind = tag ? 'tag' : 'note'
   const text = (editValue.value || '').trim()
-  const payload = { uid: track.uid, beat: cue.beat, kind, text }
+  const payload = {
+    uid: track.uid,
+    beat: cue.beat,
+    kind,
+    text,
+    // Write back the tag's own type so an unlocked TC edit stays a TC tag
+    // instead of being rewritten as a cue.
+    tagType: tag ? tag.type : CUE_TYPE
+  }
 
   saving.value = true
   error.value = ''
@@ -335,7 +526,7 @@ const saveRename = async (track, cue, tag) => {
     "        if p['kind'] == 'note':",
     "            track.setNoteAtBeat(float(p['beat']), p['text'])",
     '        else:',
-    "            track.setTagAtBeat(float(p['beat']), Tag(Tag.CUE, p['text']))",
+    "            track.setTagAtBeat(float(p['beat']), Tag(int(p['tagType']), p['text']))",
     '        out = {"ok": True}',
     'except Exception as e:',
     '    out = {"ok": False, "error": str(e)}',
@@ -359,12 +550,308 @@ const saveRename = async (track, cue, tag) => {
     } else {
       tag.text = text
     }
-    statusMsg.value = kind === 'note' ? 'Note renamed.' : 'Cue number updated.'
+    statusMsg.value =
+      kind === 'note'
+        ? 'Note renamed.'
+        : tag.type === TC_TYPE
+          ? 'Timecode tag updated.'
+          : 'Cue number updated.'
     editingKey.value = null
     editValue.value = ''
   } catch (err) {
     console.error('Error renaming in d3:', err)
     error.value = `Could not rename: ${err.message}`
+  } finally {
+    saving.value = false
+  }
+}
+
+// Every editable element across the visible tracks, flattened in the order the
+// list reads (per cue: the CUE tag, then the note). This is the path Tab walks.
+const editableItems = computed(() => {
+  const items = []
+  for (const track of filteredTracks.value) {
+    for (const cue of track.cues) {
+      // Walk cue.tags in render order so Tab follows what's on screen; TC tags
+      // only join the path once unlocked.
+      for (const tag of cue.tags || []) {
+        if (tag.type !== CUE_TYPE && !(tag.type === TC_TYPE && tcUnlocked.value)) {
+          continue
+        }
+        items.push({
+          key: tagKey(track.uid, cue.beat, tag.type),
+          value: tag.text,
+          track,
+          cue,
+          tag
+        })
+      }
+      if (cue.note) {
+        items.push({
+          key: noteKey(track.uid, cue.beat),
+          value: cue.note,
+          track,
+          cue,
+          tag: null
+        })
+      }
+    }
+  }
+  return items
+})
+
+// Tab / Shift+Tab commit the current rename and open the next (or previous)
+// element for editing, so a track's cues can be walked from the keyboard.
+// Tabbing past either end closes the editor, like tabbing out of a form.
+const moveEdit = async (delta) => {
+  if (saving.value) {
+    return
+  }
+  const items = editableItems.value
+  const current = items.findIndex((i) => i.key === editingKey.value)
+  if (current === -1) {
+    return
+  }
+
+  const item = items[current]
+  // Only write when the value actually changed — an unchanged Tab is pure
+  // navigation and shouldn't cost a round trip to d3.
+  if ((editValue.value || '').trim() !== item.value) {
+    if (isSaveDisabled.value) {
+      return // invalid entry: keep the user on this field rather than losing it
+    }
+    await saveRename(item.track, item.cue, item.tag)
+    if (error.value) {
+      return // write failed — stay put so the edit isn't silently dropped
+    }
+  }
+
+  const nextKey = items[current + delta]?.key
+  // Re-read the list after the save so the value we load is the current one.
+  const next = nextKey ? editableItems.value.find((i) => i.key === nextKey) : null
+  if (!next) {
+    cancelEdit()
+    return
+  }
+  startEdit(next.key, next.value)
+}
+
+// --- Moving an element to a different timecode ----------------------------
+
+// Marker positions are protected by default: moving one rewrites where it
+// fires in the show, so it sits behind its own unlock.
+const timeUnlocked = ref(false)
+
+// Which element is having its time changed, and the timecode being typed.
+// Kept separate from the rename state so the two can't tangle.
+const movingKey = ref(null)
+const moveValue = ref('')
+
+const moveKey = (uid, beat, type) =>
+  type == null ? `${uid}|${beat}|move:note` : `${uid}|${beat}|move:tag:${type}`
+
+const isMoveDisabled = computed(() => parseTimecode(moveValue.value) === null)
+
+const startMove = (key, currentTc) => {
+  cancelEdit()
+  movingKey.value = key
+  moveValue.value = currentTc || ''
+}
+
+const cancelMove = () => {
+  movingKey.value = null
+  moveValue.value = ''
+}
+
+const toggleTimeUnlock = () => {
+  timeUnlocked.value = !timeUnlocked.value
+  if (!timeUnlocked.value) {
+    cancelMove()
+  }
+}
+
+// Move a single element (a note, or one tag) to a different timecode. Only the
+// clicked element moves; anything else sharing that beat stays where it is.
+//
+// d3 has no timecodeToBeat, so the beat is derived here: each TC tag starts a
+// timecode range, and within a range timecode advances with track time. The
+// resolved beat is only written once it maps back to the requested timecode.
+const saveMove = async (track, cue, tag) => {
+  if (isMoveDisabled.value || saving.value) {
+    return
+  }
+  const kind = tag ? 'tag' : 'note'
+  const payload = {
+    uid: track.uid,
+    beat: cue.beat,
+    kind,
+    tagType: tag ? tag.type : TC_TYPE,
+    tc: formatTimecode(moveValue.value)
+  }
+
+  saving.value = true
+  error.value = ''
+  statusMsg.value = ''
+  const script = [
+    'import json',
+    `p = json.loads(${JSON.stringify(JSON.stringify(payload))})`,
+    'tm = guisystem.currentTransportManager',
+    'fps = float(tm.customTimelineFps)',
+    'if fps <= 0:',
+    '    fps = 30.0',
+    'track = UidManager.get().getResource(int(p["uid"]))',
+    'if track is None:',
+    '    return {"ok": False, "error": "track not found"}',
+    // Timecode counts whole frames, and at 29.97 a timecode second is NOT a real
+    // second: d3 turns time into a frame count at the true fps, then formats it
+    // using the nominal integer fps (30 for 29.97, non-drop-frame). Doing the
+    // maths in seconds drifts ~0.1% — seconds off by the end of a long track —
+    // so everything below works in frames and only converts to time at the edges.
+    'nom = int(round(fps))',
+    'if nom <= 0:',
+    '    nom = 30',
+    'def tcToFrames(s):',
+    '    q = str(s).replace(".", ":").split(":")',
+    '    while len(q) < 4:',
+    '        q.append("0")',
+    '    try:',
+    '        return (int(q[0])*3600 + int(q[1])*60 + int(q[2]))*nom + int(q[3])',
+    '    except:',
+    '        return None',
+    'def framesToTc(F):',
+    '    F = int(round(F))',
+    '    if F < 0:',
+    '        F = 0',
+    '    return "%02d:%02d:%02d:%02d" % (F//(nom*3600), (F//(nom*60))%60, (F//nom)%60, F%nom)',
+    'target = tcToFrames(p["tc"])',
+    'if target is None:',
+    '    return {"ok": False, "error": "could not parse that timecode"}',
+    // The frame field counts against the nominal fps, so 29 is valid at 29.97.
+    'tcParts = str(p["tc"]).replace(".", ":").split(":")',
+    'if len(tcParts) > 3 and int(tcParts[3]) >= nom:',
+    '    return {"ok": False, "error": "frames must be less than " + str(nom) + " at this timeline fps"}',
+    // Each TC tag opens a new timecode range; beat 0 is the implicit zero-based
+    // range covering everything before the first tag. Values are frame counts.
+    'regions = {0.0: 0}',
+    'for b in track.cueBeats():',
+    '    for tg in track.tagsAtBeat(b):',
+    '        if tg.type == 0:',
+    '            v = tcToFrames(tg.text)',
+    '            if v is not None:',
+    '                regions[float(b)] = v',
+    'rb = sorted(regions.keys())',
+    'def fwd(beat):',
+    '    base = rb[0]',
+    '    for x in rb:',
+    '        if x <= beat + 1e-6:',
+    '            base = x',
+    '    return regions[base] + int(round((track.beatToTime(beat) - track.beatToTime(base)) * fps))',
+    'newBeat = None',
+    'for i in range(len(rb)):',
+    '    base = rb[i]',
+    '    nxt = rb[i+1] if i+1 < len(rb) else None',
+    '    cand = track.timeToBeat(track.beatToTime(base) + (target - regions[base]) / fps)',
+    '    if cand < base - 1e-6:',
+    '        continue',
+    '    if nxt is not None and cand >= nxt - 1e-6:',
+    '        continue',
+    '    newBeat = cand',
+    '    break',
+    // A TC tag restarts timecode partway through a track, so the track's
+    // timecode is a set of spans with gaps between them. If the target lands in
+    // a gap, no beat has that timecode — say which spans do exist rather than
+    // just refusing.
+    'if newBeat is None:',
+    '    limit = float(track.lengthInBeats)',
+    '    spans = []',
+    '    for i in range(len(rb)):',
+    '        s = rb[i]',
+    '        e = rb[i+1] if i+1 < len(rb) else limit',
+    '        if e > limit:',
+    '            e = limit',
+    '        if e <= s:',
+    '            continue',
+    '        endFrames = regions[s] + int(round((track.beatToTime(e) - track.beatToTime(s)) * fps))',
+    '        if i + 1 < len(rb):',
+    '            endFrames = endFrames - 1',
+    '        spans.append(framesToTc(regions[s]) + "-" + framesToTc(endFrames))',
+    '    return {"ok": False, "error": "no beat on this track has that timecode. A TC tag restarts timecode partway through, so this track only covers " + " and ".join(spans)}',
+    // Never write a beat that cannot be confirmed to map back to what was asked
+    // for. One frame of slack absorbs rounding at the time/beat boundary.
+    'if abs(fwd(newBeat) - target) > 1:',
+    '    return {"ok": False, "error": "could not confirm the new timecode (round-trip mismatch)"}',
+    // beatToTimecode is transport-wide, so it is only a meaningful second
+    // opinion on the track that is actually loaded.
+    'try:',
+    '    isCurrent = (state.localOrDirectorState().track.uid == track.uid)',
+    'except:',
+    '    isCurrent = False',
+    'if isCurrent:',
+    '    try:',
+    '        rt = tcToFrames(str(tm.beatToTimecode(newBeat)))',
+    '    except:',
+    '        rt = None',
+    '    if rt is None or abs(rt - target) > 1:',
+    '        return {"ok": False, "error": "d3 reads that beat as " + str(tm.beatToTimecode(newBeat)) + ", not " + str(p["tc"]) + " — refusing to write it"}',
+    'try:',
+    '    maxBeat = float(track.lengthInBeats)',
+    'except:',
+    '    maxBeat = None',
+    'if newBeat < -1e-6 or (maxBeat is not None and newBeat > maxBeat + 1e-6):',
+    '    return {"ok": False, "error": "that timecode falls outside the track length"}',
+    'oldBeat = float(p["beat"])',
+    'if abs(newBeat - oldBeat) < 1e-6:',
+    '    return {"ok": True, "moved": False}',
+    'if p["kind"] == "note":',
+    '    text = track.noteAtBeat(oldBeat)',
+    '    if not text:',
+    '        return {"ok": False, "error": "there is no note at that beat any more"}',
+    '    overwrote = bool(track.noteAtBeat(newBeat))',
+    '    track.removeNoteAtBeat(oldBeat)',
+    '    track.setNoteAtBeat(newBeat, text)',
+    'else:',
+    '    tt = int(p["tagType"])',
+    '    text = None',
+    '    for tg in track.tagsAtBeat(oldBeat):',
+    '        if tg.type == tt:',
+    '            text = tg.text',
+    '            break',
+    '    if text is None:',
+    '        return {"ok": False, "error": "that tag is no longer at that beat"}',
+    '    overwrote = False',
+    '    for tg in track.tagsAtBeat(newBeat):',
+    '        if tg.type == tt:',
+    '            overwrote = True',
+    '            break',
+    '    track.removeTagAtBeat(oldBeat, tt)',
+    '    track.setTagAtBeat(newBeat, Tag(tt, text))',
+    'return {"ok": True, "moved": True, "beat": newBeat, "overwrote": overwrote}'
+  ].join('\n')
+
+  const requested = payload.tc
+  try {
+    const result = await executePythonVerbose(props.directorEndpoint, script)
+    let data = result.returnValue
+    if (typeof data === 'string') {
+      data = data.trim() === '' ? {} : JSON.parse(data)
+    }
+    data = data || {}
+    if (data.ok === false) {
+      throw new Error(data.error || 'Move failed')
+    }
+    cancelMove()
+    if (data.moved === false) {
+      statusMsg.value = 'Already at that timecode — nothing moved.'
+    } else {
+      // Positions changed, so re-pull for ground truth (and correct ordering).
+      await pull()
+      statusMsg.value = data.overwrote
+        ? `Moved to ${requested}, replacing what was already at that beat.`
+        : `Moved to ${requested}.`
+    }
+  } catch (err) {
+    console.error('Error moving in d3:', err)
+    error.value = `Could not move: ${err.message}`
   } finally {
     saving.value = false
   }
@@ -409,6 +896,16 @@ const pull = async () => {
     '        tm = None',
     '    out = []',
     '    for t in resourceManager.allResources(TrackType):',
+    // Deleted tracks stay in the resource list, distinguished only by living
+    // under trash/ (e.g. "trash/objects/track/foo.apx"). Skip them, otherwise a
+    // deleted track shows up alongside the live one with the same name. If the
+    // path can't be read, keep the track rather than hide it silently.
+    '        try:',
+    '            tpath = str(t.path).replace("\\\\", "/").lower()',
+    '        except:',
+    '            tpath = ""',
+    '        if tpath.startswith("trash/") or "/trash/" in tpath:',
+    '            continue',
     '        try:',
     '            uid = str(t.uid)',
     '        except:',
@@ -418,12 +915,39 @@ const pull = async () => {
     '        except:',
     '            name = ""',
     '        cues = []',
-    '        for beat in t.cueBeats():',
+    // Section breaks live outside the cue/note system: a track exposes them as
+    // nSections() boundaries. Section 0 starts at beat 0 (the track start, not
+    // a break) so it is skipped. Beats are rounded to a common key because a
+    // section boundary and a cue at the "same" beat can differ in the last bits.
+    '        secBeats = {}',
+    '        try:',
+    '            nSec = t.nSections()',
+    '        except:',
+    '            nSec = 0',
+    '        for i in range(1, nSec):',
+    '            try:',
+    '                secBeats[round(t.sectionToBeat(i), 6)] = i',
+    '            except:',
+    '                pass',
+    '        beats = []',
+    '        seen = {}',
+    '        for b in t.cueBeats():',
+    '            k = round(b, 6)',
+    '            if k not in seen:',
+    '                seen[k] = True',
+    '                beats.append(b)',
+    '        for k in secBeats:',
+    '            if k not in seen:',
+    '                seen[k] = True',
+    '                beats.append(k)',
+    '        beats.sort()',
+    '        for beat in beats:',
     '            note = t.noteAtBeat(beat)',
     '            tags = []',
     '            for tag in t.tagsAtBeat(beat):',
     '                tags.append({"type": tag.type, "text": tag.text})',
-    '            if note or tags:',
+    '            section = secBeats.get(round(beat, 6))',
+    '            if note or tags or section is not None:',
     '                try:',
     '                    secs = t.beatToTime(beat)',
     '                except:',
@@ -434,7 +958,7 @@ const pull = async () => {
     '                        tc = str(tm.beatToTimecode(beat))',
     '                    except:',
     '                        tc = ""',
-    '                cues.append({"beat": beat, "secs": secs, "tc": tc, "note": note, "tags": tags})',
+    '                cues.append({"beat": beat, "secs": secs, "tc": tc, "note": note, "tags": tags, "section": section})',
     '        if cues:',
     '            out.append({"uid": uid, "name": name, "cues": cues})',
     '    return {"ok": True, "tracks": out}',
@@ -460,7 +984,13 @@ const pull = async () => {
     selected.value = new Set()
     pulled.value = true
     const total = list.reduce((n, t) => n + t.cues.length, 0)
-    statusMsg.value = `Pulled ${total} cue(s) across ${list.length} track(s).`
+    const sections = list.reduce(
+      (n, t) => n + t.cues.filter(c => c.section != null).length,
+      0
+    )
+    statusMsg.value = sections
+      ? `Pulled ${total} cue(s) across ${list.length} track(s), including ${sections} section break(s).`
+      : `Pulled ${total} cue(s) across ${list.length} track(s).`
   } catch (err) {
     console.error('Error pulling cues from d3:', err)
     error.value = `Could not pull from d3: ${err.message}`
@@ -485,7 +1015,7 @@ const confirmDelete = async () => {
         items.push({ uid: t.uid, beat: c.beat, kind: 'note' })
       }
       for (const tag of c.tags) {
-        if (tag.type !== TC_TYPE && isSelected(tagKey(t.uid, c.beat, tag.type))) {
+        if ((tag.type !== TC_TYPE || tcUnlocked.value) && isSelected(tagKey(t.uid, c.beat, tag.type))) {
           items.push({ uid: t.uid, beat: c.beat, kind: 'tag', tagType: tag.type })
         }
       }
@@ -691,6 +1221,14 @@ const confirmDelete = async () => {
 .badge-note { background-color: #37474f; color: #b0bec5; }
 .badge-midi { background-color: #6a1b9a; color: #fff; }
 .badge-tc { background-color: #424242; color: #bdbdbd; }
+.badge-section { background-color: #00695c; color: #e0f2f1; }
+
+/* Section breaks read as a divider in the track, so give them a rule above. */
+.section-break {
+  border-top: 1px dashed #00695c;
+  padding-top: 0.3rem;
+  margin-top: 0.15rem;
+}
 
 /* d3-style cue chip: dark pennant with a left-pointing wedge marking the beat,
    matching how cues are drawn on the timeline. Flat fill, no bevel/shadow. */
@@ -708,17 +1246,15 @@ const confirmDelete = async () => {
 
 .cleanup-text { color: #e0e0e0; word-break: break-word; }
 
-/* Inline rename: pencil button shown on each note/cue, and the edit field. */
-.edit-btn {
-  background: none;
-  border: none;
-  color: #757575;
-  cursor: pointer;
-  font-size: 0.85rem;
-  padding: 0 0.25rem;
-  line-height: 1;
+/* Inline rename: the note text / cue chip is itself the click target, so give
+   it a hover cue instead of a separate pencil button. */
+.editable { cursor: pointer; }
+.cleanup-text.editable:hover {
+  color: #64b5f6;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
-.edit-btn:hover { color: #64b5f6; }
+.cue-chip.editable:hover { background: #4a4a4a; }
 
 .cleanup-edit-input {
   padding: 0.2rem 0.4rem;
@@ -731,7 +1267,46 @@ const confirmDelete = async () => {
   min-width: 12rem;
 }
 .cleanup-edit-input.cue-edit { min-width: 5rem; width: 5rem; text-align: center; }
+.cleanup-edit-input.tc-edit { min-width: 8rem; width: 8rem; font-variant-numeric: tabular-nums; }
+
+/* Unlock toggles: muted while protecting, amber once the guard is off so the
+   unlocked state is obvious at a glance. */
+.lock-btn {
+  background: none;
+  border: 1px solid #424242;
+  border-radius: 4px;
+  color: #9e9e9e;
+  cursor: pointer;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.5rem;
+  white-space: nowrap;
+}
+.lock-btn:hover { border-color: #616161; color: #e0e0e0; }
+.lock-btn.unlocked {
+  border-color: #ef6c00;
+  color: #ffb74d;
+  background-color: rgba(239, 108, 0, 0.12);
+}
+
+/* Per-element timecode, shown only while time is unlocked. Clicking it opens
+   the move editor for that one element. */
+.move-time {
+  color: #ffb74d;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+  padding-left: 0.5rem;
+  white-space: nowrap;
+}
+.move-time:hover {
+  color: #ffe0b2;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .cleanup-edit-input:focus { outline: none; border-color: #64b5f6; }
+/* Typed something that won't validate: say so rather than just disabling Save. */
+.cleanup-edit-input.invalid,
+.cleanup-edit-input.invalid:focus { border-color: #c62828; }
 
 .edit-action {
   padding: 0.2rem 0.6rem;
