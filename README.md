@@ -29,16 +29,51 @@ steps with the newest release.
 
 ## Features
 
+The plugin has two pages: **Markers** for capturing playhead positions and
+writing them to the timeline, and **Timeline Cleanup** for tidying up the cues
+and notes already in the session.
+
+### Markers
+
 - **Capture markers** at the current playhead position, each tagged with its
-  transport and track.
+  transport and track. The playhead reads out in d3's own timecode, and each
+  marker stores its timecode, seconds, and beat.
 - **Jump to a marker** with the *Go To* button — it seeks to the right track and
   time even if it lives in a different track.
-- **Label markers** with free-text notes that are kept in import/export.
-- **Number-key shortcuts** (1–9) and a `` ` `` hotkey to capture/recall markers
-  hands-free.
+- **Label markers** with free-text notes, and give each one an optional **cue
+  number** (digits and dots, e.g. `1` or `1.1`).
+- **Send to d3** writes the markers onto the timeline — labels become timeline
+  notes and cue numbers become `CUE` tags, both at the captured beat. Markers
+  are grouped by the track they came from.
+- **Note prefix** — an optional prefix (e.g. `@`) is prepended with an
+  underscore to every note sent to d3 (`@_cue1`), so plugin-added notes can be
+  told apart from hand-placed ones.
+- **Show Existing** interleaves the cues, notes, and section breaks already on
+  the active track with your captured markers, sorted by time, with click-to-seek
+  and a refresh button.
+- **Number-key shortcuts** (1–9) to recall markers and a `` ` `` hotkey to
+  capture one, each armed by its own toggle so they can't fire by accident.
 - **Reorder** markers by drag and drop.
-- **Import / export** the full marker list (position, transport, track, and
-  notes) as YAML.
+- **Markers persist** across reloads, along with the note prefix.
+- **Import / export** the full marker list (position, timecode, beat, transport,
+  track, notes, and cue numbers) as YAML. Export copies to the clipboard and
+  import takes a pasted document — d3's plugin webview blocks file downloads and
+  uploads, so both work through overlays instead.
+
+### Timeline Cleanup
+
+- **Pull from d3** reads every note and cue from all tracks in the session.
+- **Rename notes and cue numbers in place** — edits are saved back at the same
+  beat, so cue timing never moves. Tab / Shift+Tab steps between items.
+- **Delete** the items you don't want, ticked individually. Deletion is
+  per-element, so a `CUE` tag can be removed while a `TC` tag on the same cue
+  survives.
+- **Search** live across track names, note text, and tag text.
+- **Protected by default** — `TC` tags and item times can't be touched until you
+  unlock them: *Unlock TC* allows editing and deleting timecode tags, and
+  *Unlock time* reveals each item's timecode so a single note or tag can be
+  moved. Section breaks are shown for context and are never editable.
+- Nothing is rewritten except the items you actually change.
 
 ## Disguise API reference
 
